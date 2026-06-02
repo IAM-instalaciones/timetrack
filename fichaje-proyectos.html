@@ -77,6 +77,18 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
 
 window.msal = (typeof globalThis !== "undefined" && globalThis.msal) ? globalThis.msal : (typeof self !== "undefined" && self.msal) ? self.msal : window.msal;
 </script>
+<script>
+// Proxy global para el botón Microsoft — se define aquí para garantizar que existe
+window._doMSLogin = function(){
+  if(typeof loginMicrosoft === 'function'){
+    loginMicrosoft();
+  } else {
+    // App script no cargó — recargar
+    console.error('loginMicrosoft not found, reloading');
+    location.reload();
+  }
+};
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -335,7 +347,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   <div style="font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:10px;width:100%;letter-spacing:1.2px;text-transform:uppercase;">TimeTrack · Control de Tiempos</div>
 </div>
     <div id="ms-login-area" style="margin-bottom:16px;">
-      <button class="btn btn-accent w100" onclick="loginMicrosoft();" style="justify-content:center;gap:10px;padding:12px;font-size:14px;">
+      <button class="btn btn-accent w100" onclick="window._doMSLogin();" style="justify-content:center;gap:10px;padding:12px;font-size:14px;">
         <svg width="18" height="18" viewBox="0 0 21 21" fill="none"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
         Entrar con Microsoft 365
       </button>
