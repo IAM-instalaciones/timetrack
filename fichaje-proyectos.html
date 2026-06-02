@@ -1088,7 +1088,9 @@ function logout(){
   document.getElementById('app-shell').style.display='none';
   document.getElementById('login-screen').style.display='flex';
   switchLoginTab('worker');
-  
+  save();
+}
+
 // ═══════════════════════════════════════════════════════════
 // FILE SYSTEM ACCESS API
 // Trabajador: guarda Excel diario en su carpeta de red
@@ -1797,7 +1799,6 @@ setInterval(async()=>{
 setTimeout(actualizarBadgePendientes, 2000);
 
 initMSAL().then(()=>initLogin());
-}
 
 
 // ═══════════════════════════════════════════════════════════
