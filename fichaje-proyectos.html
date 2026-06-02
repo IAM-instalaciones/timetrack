@@ -352,22 +352,26 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
         Entrar con Microsoft 365
       </button>
       <div id="ms-login-error" style="color:var(--red);font-size:12px;text-align:center;margin-top:6px;min-height:16px;"></div>
+      <div style="color:var(--muted);font-size:11px;text-align:center;margin-top:4px;">Los técnicos deben entrar con Microsoft 365</div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
       <div style="flex:1;height:1px;background:var(--border);"></div>
-      <div style="font-size:11px;color:var(--muted);">o acceso directo</div>
+      <div style="font-size:11px;color:var(--muted);">o acceso de administrador</div>
       <div style="flex:1;height:1px;background:var(--border);"></div>
     </div>
-    <div class="login-tabs">
+    <div class="login-tabs" style="display:none;" id="worker-tab-header">
       <div class="ltab ltab-worker active" onclick="switchLoginTab('worker')" id="ltab-worker">Trabajador</div>
       <div class="ltab ltab-admin" onclick="switchLoginTab('admin')" id="ltab-admin">Administrador</div>
     </div>
-    <div class="login-panel active" id="lpanel-worker">
+    <div class="login-tabs" id="admin-only-tab">
+      <div class="ltab ltab-admin active" onclick="switchLoginTab('admin')" id="ltab-admin2">Administrador (PIN)</div>
+    </div>
+    <div class="login-panel" id="lpanel-worker" style="display:none;">
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Selecciona tu nombre para comenzar</div>
       <div class="worker-grid" id="worker-grid"></div>
       <button class="btn btn-accent w100" onclick="loginWorker()" id="btn-login-worker" style="margin-top:16px;" disabled>Entrar</button>
     </div>
-    <div class="login-panel" id="lpanel-admin">
+    <div class="login-panel active" id="lpanel-admin">
       <div style="font-size:12px;color:var(--muted);margin-bottom:16px;text-align:center;">PIN de administrador</div>
       <div class="admin-pin"><div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div><div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div></div>
       <div class="pin-error" id="pin-error"></div>
@@ -1669,9 +1673,16 @@ async function loginMicrosoft(){
             }
           }
         }
-        // Datos cargados de SP — mostrar login para que cada uno elija su rol
+        // Datos cargados de SP — mostrar panel de trabajadores
         showSyncStatus('✓ Conectado con Microsoft 365 — selecciona tu usuario',true);
         save();
+        // Mostrar panel de trabajadores y ocultar el de solo-admin
+        document.getElementById('admin-only-tab').style.display='none';
+        document.getElementById('worker-tab-header').style.display='flex';
+        document.getElementById('lpanel-worker').style.display='block';
+        document.getElementById('lpanel-admin').classList.remove('active');
+        document.getElementById('lpanel-worker').classList.add('active');
+        switchLoginTab('worker');
         initLogin(); // Refresca lista de trabajadores con datos de SP
       }
     }
