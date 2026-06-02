@@ -1616,16 +1616,57 @@ async function loginMicrosoft(){
     await initMSAL();
   }
   if(!msalInstance){ alert('Error: MSAL no disponible. Recarga la página.'); return; }
-  document.getElementById('ms-login-error').textContent = '';
+  const errEl = document.getElementById('ms-login-error');
+  if(errEl) errEl.textContent = '';
   try{
-    showSyncStatus('⟳ Redirigiendo a Microsoft...', true);
-    // Guardar flag para saber que venimos de login
-    sessionStorage.setItem('msal_login_intent','1');
-    await msalInstance.loginRedirect({scopes: SP_SCOPES, prompt:'select_account'});
+    showSyncStatus('⟳ Conectando con Microsoft...', true);
+    const response = await msalInstance.loginPopup({scopes: SP_SCOPES, prompt:'select_account'});
+    if(response){
+      msalAccount = response.account;
+      msalToken = response.accessToken;
+      showSyncStatus('✓ Conectado con Microsoft 365', true);
+      // Cargar IDs de SP y datos
+      await Promise.all(Object.keys(SP_CONFIG.lists).map(l => cargarSpIds(l)));
+      const ok = await cargarDesdeSP();
+      if(ok){
+        // SP vacío pero hay datos locales
+        if(!S.trabajadores.length && !S.proyectos.length){
+          const v7 = localStorage.getItem('tt_v7');
+          const v8 = localStorage.getItem('tt_v8');
+          const localData = JSON.parse(v7 || v8 || '{}');
+          if(localData.trabajadores?.length || localData.proyectos?.length){
+            const subir = confirm('SharePoint está vacío pero tienes datos guardados localmente.\n¿Quieres subirlos a SharePoint ahora?');
+            if(subir){
+              if(localData.proyectos)    S.proyectos     = localData.proyectos;
+              if(localData.departamentos)S.departamentos = localData.departamentos;
+              if(localData.tareas)       S.tareas        = localData.tareas;
+              if(localData.trabajadores) S.trabajadores  = localData.trabajadores;
+              if(localData.registros)    S.registros     = localData.registros;
+              if(localData.gastos)       S.gastos        = localData.gastos || [];
+              if(localData.pin)          S.pin           = localData.pin;
+              save();
+              await subirTodoASP();
+            }
+          }
+        }
+        // Entrar como admin
+        session = {role:'admin', workerId:null};
+        document.getElementById('login-screen').style.display='none';
+        document.getElementById('app-shell').style.display='flex';
+        const badge=document.getElementById('session-badge');
+        if(badge){badge.textContent='Admin';badge.className='s-badge s-badge-admin';}
+        document.getElementById('admin-nav').style.display='flex';
+        document.getElementById('worker-nav').style.display='none';
+        showPage('dashboard');
+        renderPage('dashboard');
+        renderSidebar();
+      }
+    }
   }catch(e){
     console.error('loginMicrosoft error:', e);
-    document.getElementById('ms-login-error').textContent = 'Error: ' + e.message;
-    showSyncStatus('⚠ Error de conexión', false);
+    const msg = e.errorCode === 'user_cancelled' ? 'Login cancelado' : 'Error: ' + e.message;
+    if(errEl) errEl.textContent = msg;
+    showSyncStatus('⚠ ' + msg, false);
   }
 }
 
