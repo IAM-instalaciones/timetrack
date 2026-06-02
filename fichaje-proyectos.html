@@ -1027,8 +1027,20 @@ function initLogin(){
   selectedWorkerId=null;pinBuffer='';
   document.getElementById('btn-login-worker').disabled=true;
   updatePinDots();document.getElementById('pin-error').textContent='';
+  // Si hay sesión MSAL activa, recargar datos frescos de SP antes de mostrar trabajadores
+  if(msalToken){
+    cargarDesdeSP().then(()=>renderWorkerGrid());
+  }else{
+    renderWorkerGrid();
+  }
+}
+function renderWorkerGrid(){
   const grid=document.getElementById('worker-grid');
-  if(!S.trabajadores.length){grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--muted);font-size:12px;padding:20px;">Sin trabajadores. Entra como Administrador.</div>`;return;}
+  if(!grid)return;
+  if(!S.trabajadores.length){
+    grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--muted);font-size:12px;padding:20px;">Sin trabajadores. Entra como Administrador.</div>`;
+    return;
+  }
   grid.innerHTML=S.trabajadores.map(t=>{
     const ini=(t.nombre[0]+(t.apellidos?t.apellidos[0]:'')).toUpperCase();
     return`<div class="worker-btn" onclick="selWorker('${t.id}',this)">
@@ -1489,7 +1501,7 @@ async function initMSAL(){
         authority: `https://login.microsoftonline.com/${SP_CONFIG.tenantId}`,
         redirectUri: SP_CONFIG.redirectUri
       },
-      cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true }
     });
     // Necesario llamar initialize() en MSAL v3+, ignorar si no existe
     if(msalInstance.initialize) await msalInstance.initialize();
@@ -1657,17 +1669,10 @@ async function loginMicrosoft(){
             }
           }
         }
-        // Entrar como admin
-        session = {role:'admin', workerId:null};
-        document.getElementById('login-screen').style.display='none';
-        document.getElementById('app-shell').style.display='flex';
-        const badge=document.getElementById('session-badge');
-        if(badge){badge.textContent='Admin';badge.className='s-badge s-badge-admin';}
-        document.getElementById('admin-nav').style.display='flex';
-        document.getElementById('worker-nav').style.display='none';
-        showPage('dashboard');
-        renderPage('dashboard');
-        renderSidebar();
+        // Datos cargados de SP — mostrar login para que cada uno elija su rol
+        showSyncStatus('✓ Conectado con Microsoft 365 — selecciona tu usuario',true);
+        save();
+        initLogin(); // Refresca lista de trabajadores con datos de SP
       }
     }
   }catch(e){
