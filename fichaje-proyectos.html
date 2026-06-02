@@ -1480,16 +1480,22 @@ async function initMSAL(){
     attempts++;
   }
   if(typeof msal === 'undefined'){ console.warn('MSAL no disponible tras espera'); return; }
-  msalInstance = new msal.PublicClientApplication({
-    auth: {
-      clientId: SP_CONFIG.clientId,
-      authority: `https://login.microsoftonline.com/${SP_CONFIG.tenantId}`,
-      redirectUri: SP_CONFIG.redirectUri
-    },
-    cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
-  });
-  // Manejar redirect de vuelta desde Microsoft
-  await completarLoginMSAL();
+  try{
+    msalInstance = new msal.PublicClientApplication({
+      auth: {
+        clientId: SP_CONFIG.clientId,
+        authority: `https://login.microsoftonline.com/${SP_CONFIG.tenantId}`,
+        redirectUri: SP_CONFIG.redirectUri
+      },
+      cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
+    });
+    // Necesario llamar initialize() en MSAL v3+, ignorar si no existe
+    if(msalInstance.initialize) await msalInstance.initialize();
+    console.log('MSAL inicializado correctamente');
+  }catch(e){
+    console.error('Error iniciando MSAL:', e);
+    msalInstance = null;
+  }
 }
 
 const SP_SCOPES = ['https://iamnet.sharepoint.com/AllSites.Write','User.Read'];
