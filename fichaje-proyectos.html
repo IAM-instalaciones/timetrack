@@ -902,13 +902,17 @@ function pinSubmit(){
   else{document.getElementById('pin-error').textContent='PIN incorrecto';pinBuffer='';updatePinDots();setTimeout(()=>document.getElementById('pin-error').textContent='',2000);}
 }
 function startApp(){
-  document.getElementById('login-screen').style.display='none';
-  document.getElementById('app-shell').style.display='flex';
+  const loginScreen=document.getElementById('login-screen');
+  const appShell=document.getElementById('app-shell');
   const badge=document.getElementById('session-badge');
+  const adminNav=document.getElementById('admin-nav');
+  const workerNav=document.getElementById('worker-nav');
+  if(loginScreen) loginScreen.style.display='none';
+  if(appShell) appShell.style.display='flex';
   if(session.role==='admin'){
-    badge.textContent='Admin';badge.className='s-badge s-badge-admin';
-    document.getElementById('admin-nav').style.display='flex';
-    document.getElementById('worker-nav').style.display='none';
+    if(badge){badge.textContent='Admin';badge.className='s-badge s-badge-admin';}
+    if(adminNav) adminNav.style.display='flex';
+    if(workerNav) workerNav.style.display='none';
     // Cargar desde SP si hay token, si no usar datos locales
     if(msalToken){
       cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});
@@ -922,9 +926,9 @@ function startApp(){
     showPage('dashboard');
   }else{
     const w=S.trabajadores.find(x=>x.id===session.workerId);
-    badge.textContent=w?w.nombre:'?';badge.className='s-badge s-badge-worker';
-    document.getElementById('admin-nav').style.display='none';
-    document.getElementById('worker-nav').style.display='flex';
+    if(badge){badge.textContent=w?w.nombre:'?';badge.className='s-badge s-badge-worker';}
+    if(adminNav) adminNav.style.display='none';
+    if(workerNav) workerNav.style.display='flex';
     workerSelectedDate=todayStr();
     const d=new Date(workerSelectedDate);calYear=d.getFullYear();calMonth=d.getMonth();
     workerMode='horas';
