@@ -909,7 +909,16 @@ function startApp(){
     badge.textContent='Admin';badge.className='s-badge s-badge-admin';
     document.getElementById('admin-nav').style.display='flex';
     document.getElementById('worker-nav').style.display='none';
-    if(msalToken){cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});}
+    // Cargar desde SP si hay token, si no usar datos locales
+    if(msalToken){
+      cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});
+    }else{
+      // Intentar recuperar token silenciosamente
+      getToken().then(token=>{
+        if(token){cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});}
+        else{renderPage('dashboard');renderSidebar();}
+      });
+    }
     showPage('dashboard');
   }else{
     const w=S.trabajadores.find(x=>x.id===session.workerId);
@@ -919,15 +928,28 @@ function startApp(){
     workerSelectedDate=todayStr();
     const d=new Date(workerSelectedDate);calYear=d.getFullYear();calMonth=d.getMonth();
     workerMode='horas';
-    if(msalToken){cargarDesdeSP().then(()=>{renderPage(currentPage);renderSidebar();});}
+    if(msalToken){
+      cargarDesdeSP().then(()=>{renderPage(currentPage);renderSidebar();});
+    }else{
+      getToken().then(token=>{
+        if(token){cargarDesdeSP().then(()=>{renderPage(currentPage);renderSidebar();});}
+        else{renderPage(currentPage);renderSidebar();}
+      });
+    }
     showPage('worker-day');
   }
 }
 function logout(){
   session={role:null,workerId:null};
+  msalToken=null;
   document.getElementById('app-shell').style.display='none';
   document.getElementById('login-screen').style.display='flex';
-  switchLoginTab('worker');
+  // Mostrar solo panel admin si no hay token MSAL
+  document.getElementById('admin-only-tab').style.display='flex';
+  document.getElementById('worker-tab-header').style.display='none';
+  document.getElementById('lpanel-admin').classList.add('active');
+  document.getElementById('lpanel-worker').classList.remove('active');
+  document.getElementById('lpanel-worker').style.display='none';
   save();
 }
 
