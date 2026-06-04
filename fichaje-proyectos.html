@@ -399,28 +399,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
     <!-- ADMIN NAV -->
     <div id="admin-nav" style="display:none;flex:1;overflow:hidden;flex-direction:column;">
       <div class="sb-section">
-        <div class="sb-label">General</div>
-        <div class="nav-item" onclick="showPage('dashboard')" id="nav-dashboard"><span style="width:16px;text-align:center;">⬡</span>Dashboard</div>
-        <div class="nav-item" onclick="showPage('fichajes')" id="nav-fichajes"><span style="width:16px;text-align:center;">◷</span>Fichajes</div>
-        <div class="nav-item" onclick="showPage('gastos-admin')" id="nav-gastos-admin"><span style="width:16px;text-align:center;">€</span>Gastos</div>
-        <div class="nav-item" onclick="showPage('trabajadores')" id="nav-trabajadores"><span style="width:16px;text-align:center;">◎</span>Trabajadores</div>
-        <div class="nav-item" onclick="showPage('departamentos')" id="nav-departamentos"><span style="width:16px;text-align:center;">◧</span>Depts. y Tareas</div>
-        <div class="nav-item" onclick="showPage('informe')" id="nav-informe"><span style="width:16px;text-align:center;">◈</span>Informe</div>
-        <div class="nav-item" onclick="cargarDatosEquipo()" style="color:var(--accent);"><span style="width:16px;text-align:center;">📂</span>Cargar equipo</div>
-      </div>
-      <div class="sb-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
-        <div class="sb-label">Proyectos <span class="sb-label-add" onclick="openModalProyecto(null,null)">+</span></div>
-        <div class="sidebar-projs" id="sidebar-proj-list"></div>
-      </div>
-    </div>
-    <!-- WORKER NAV -->
-    <div id="worker-nav" style="display:none;flex:1;overflow:hidden;flex-direction:column;">
-      <div class="sb-section">
-        <div class="sb-label">Mi actividad</div>
-        <div class="nav-item" onclick="showPage('worker-day')" id="nav-worker-day"><span style="width:16px;text-align:center;">◷</span>Hoy</div>
-        <div class="nav-item" onclick="showPage('worker-cal')" id="nav-worker-cal"><span style="width:16px;text-align:center;">▦</span>Calendario</div>
-        <div class="nav-item" onclick="configurarCarpeta()" style="color:var(--amber);"><span style="width:16px;text-align:center;">📁</span><span id="fs-nav-label">Configurar carpeta</span></div>
-      </div>
+        <div class="sb-label">General</div>      </div>
     </div>
     <div style="padding:12px 16px;border-top:1px solid var(--border);">
       <button class="btn btn-sm w100" onclick="logout()">↩ Cambiar sesión</button>
@@ -818,184 +797,33 @@ const TIPOS=[
   {id:'otros',      label:'Otros',      icon:'📎'},
 ];
 
-// ── URL del servidor ──
-const SERVER = (window.location.protocol==='http:'||window.location.protocol==='https:')
-  ? window.location.origin
-  : 'http://localhost:7432';
-let _servidorActivo = false;
-
-async function serverPost(endpoint, data){
-  const r = await fetch(SERVER+endpoint, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(data)
-  });
-  if(!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-async function serverGet(endpoint){
-  const r = await fetch(SERVER+endpoint);
-  if(!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
 // ── Save local siempre, servidor si disponible ──
 function save(){localStorage.setItem('tt_v8',JSON.stringify(S));}
 
 // ── Sincronizar config (trabajadores, proyectos, depts, tareas, pin) ──
 async function syncConfig(){
-  const cfg={proyectos:S.proyectos,departamentos:S.departamentos,
-    tareas:S.tareas,trabajadores:S.trabajadores,pin:S.pin};
-  _addPendiente({tipo:'config',data:cfg});
-  actualizarBadgePendientes();
-  if(_servidorActivo){
-    try{
-      await serverPost('/guardar-config',cfg);
-      _removePendiente('config','config');
-      actualizarBadgePendientes();
-    }catch(e){console.warn('syncConfig offline');}
-  }
-  // También sincronizar con SP si hay token
-  if(msalToken){
-    for(const p of S.proyectos)     spGuardar('proyectos',p);
-    for(const d of S.departamentos) spGuardar('departamentos',d);
-    for(const t of S.tareas)        spGuardar('tareas',t);
-    for(const t of S.trabajadores)  spGuardar('trabajadores',t);
-    if(S.pin) spGuardar('config',{id:'pin',value:S.pin});
-  }
+  if(!msalToken) return;
+  for(const p of S.proyectos)     spGuardar('proyectos',p);
+  for(const d of S.departamentos) spGuardar('departamentos',d);
+  for(const t of S.tareas)        spGuardar('tareas',t);
+  for(const t of S.trabajadores)  spGuardar('trabajadores',t);
+  if(S.pin) spGuardar('config',{id:'pin',value:S.pin});
 }
 
-// ── Cargar todo desde servidor ──
-async function cargarDesdeServidor(){
-  try{
-    const data = await serverGet('/cargar-todo');
-    S.proyectos     = data.proyectos     || S.proyectos;
-    S.departamentos = data.departamentos || S.departamentos;
-    S.tareas        = data.tareas        || S.tareas;
-    S.trabajadores  = data.trabajadores  || S.trabajadores;
-    S.pin           = data.pin           || S.pin;
-    S.registros     = data.registros     || [];
-    S.gastos        = data.gastos        || [];
-    save();
-    _servidorActivo = true;
-    showSyncStatus('✓ Conectado al servidor IAM',true);
-    return true;
-  }catch(e){
-    _servidorActivo = false;
-    showSyncStatus('⚠ Sin servidor — modo local',false);
-    return false;
-  }
-}
-
-// ── Cola de cambios pendientes (modo offline) ──
-// Formato: [{tipo:'registro'|'gasto'|'delete-registro'|'delete-gasto', data:{...}}]
-function _getPendientes(){
-  try{return JSON.parse(localStorage.getItem('tt_pendientes')||'[]');}catch{return [];}
-}
-function _setPendientes(lista){localStorage.setItem('tt_pendientes',JSON.stringify(lista));}
-function _addPendiente(item){
-  const lista=_getPendientes();
-  // Evitar duplicados por id
-  const filtrada=lista.filter(p=>!(p.tipo===item.tipo&&p.data?.id&&p.data.id===item.data?.id));
-  filtrada.push({...item,ts:Date.now()});
-  _setPendientes(filtrada);
-}
-function _removePendiente(tipo,id){
-  const lista=_getPendientes().filter(p=>!(p.tipo===tipo&&p.data?.id===id));
-  _setPendientes(lista);
-}
-
-// Mostrar badge de pendientes
-function actualizarBadgePendientes(){
-  const n=_getPendientes().length;
-  let badge=document.getElementById('badge-pendientes');
-  if(!badge){
-    badge=document.createElement('div');
-    badge.id='badge-pendientes';
-    badge.style.cssText='position:fixed;bottom:16px;left:16px;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:600;z-index:999;font-family:Syne,sans-serif;cursor:pointer;';
-    badge.onclick=()=>sincronizarPendientes();
-    document.body.appendChild(badge);
-  }
-  if(n>0){
-    badge.style.display='block';
-    badge.style.background='rgba(240,168,50,0.15)';
-    badge.style.color='var(--amber)';
-    badge.style.border='1px solid var(--amber-border)';
-    badge.textContent=`⟳ ${n} cambio${n>1?'s':''} pendiente${n>1?'s':''} de sincronizar`;
-  }else{
-    badge.style.display='none';
-  }
-}
-
-// Sincronizar pendientes con el servidor
-async function sincronizarPendientes(){
-  const pendientes=_getPendientes();
-  if(!pendientes.length)return;
-  let ok=0,fail=0;
-  for(const p of pendientes){
-    try{
-      if(p.tipo==='registro')       await serverPost('/guardar-registro',{registro:p.data});
-      else if(p.tipo==='gasto')     await serverPost('/guardar-gasto',{gasto:p.data});
-      else if(p.tipo==='del-reg')   await serverPost('/eliminar-registro',{trabajadorId:p.data.trabajadorId,id:p.data.id});
-      else if(p.tipo==='del-gasto') await serverPost('/eliminar-gasto',{trabajadorId:p.data.trabajadorId,id:p.data.id});
-      else if(p.tipo==='config')    await serverPost('/guardar-config',p.data);
-      _removePendiente(p.tipo,p.data?.id||'config');
-      ok++;
-    }catch(e){fail++;}
-  }
-  actualizarBadgePendientes();
-  if(ok>0)showSyncStatus(`✓ Sincronizados ${ok} cambios`,true);
-  if(fail>0)showSyncStatus(`⚠ ${fail} cambios sin sincronizar — servidor no disponible`,false);
-}
-
-// ── Guardar registro ──
+// ── Guardar registro en SharePoint ──
 async function syncRegistro(reg){
-  _addPendiente({tipo:'registro',data:reg});
-  actualizarBadgePendientes();
-  if(_servidorActivo){
-    try{
-      await serverPost('/guardar-registro',{registro:reg});
-      _removePendiente('registro',reg.id);
-      actualizarBadgePendientes();
-    }catch(e){console.warn('syncRegistro offline, quedará pendiente');}
-  if(msalToken) spGuardar('registros',reg);
-  }
+  if(msalToken) spGuardar('registros', reg);
 }
-async function deleteRegistroServidor(trabId,regId){
-  _addPendiente({tipo:'del-reg',data:{id:regId,trabajadorId:trabId}});
-  actualizarBadgePendientes();
-  if(_servidorActivo){
-    try{
-      await serverPost('/eliminar-registro',{trabajadorId:trabId,id:regId});
-      _removePendiente('del-reg',regId);
-      actualizarBadgePendientes();
-    }catch(e){console.warn('deleteRegistro offline');}
-  }
+async function deleteRegistroServidor(trabId, regId){
+  if(msalToken) spEliminar('registros', regId);
 }
 
-// ── Guardar gasto ──
+// ── Guardar gasto en SharePoint ──
 async function syncGasto(gasto){
-  _addPendiente({tipo:'gasto',data:{...gasto,ticket:null}}); // sin imagen en cola
-  actualizarBadgePendientes();
-  if(_servidorActivo){
-    try{
-      await serverPost('/guardar-gasto',{gasto:{...gasto}});
-      _removePendiente('gasto',gasto.id);
-      actualizarBadgePendientes();
-    }catch(e){console.warn('syncGasto offline');}
-  if(msalToken) spGuardar('gastos',{...gasto,ticket:null});
-  }
+  if(msalToken) spGuardar('gastos', {...gasto, ticket:null});
 }
-async function deleteGastoServidor(trabId,gastoId){
-  _addPendiente({tipo:'del-gasto',data:{id:gastoId,trabajadorId:trabId}});
-  actualizarBadgePendientes();
-  if(_servidorActivo){
-    try{
-      await serverPost('/eliminar-gasto',{trabajadorId:trabId,id:gastoId});
-      _removePendiente('del-gasto',gastoId);
-      actualizarBadgePendientes();
-    }catch(e){console.warn('deleteGasto offline');}
-  }
+async function deleteGastoServidor(trabId, gastoId){
+  if(msalToken) spEliminar('gastos', gastoId);
 }
 
 function showSyncStatus(msg,ok){
@@ -1081,9 +909,7 @@ function startApp(){
     badge.textContent='Admin';badge.className='s-badge s-badge-admin';
     document.getElementById('admin-nav').style.display='flex';
     document.getElementById('worker-nav').style.display='none';
-    cargarDesdeServidor().then(ok=>{
-      if(ok){renderPage('dashboard');renderSidebar();}
-    });
+    if(msalToken){cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});}
     showPage('dashboard');
   }else{
     const w=S.trabajadores.find(x=>x.id===session.workerId);
@@ -1093,9 +919,7 @@ function startApp(){
     workerSelectedDate=todayStr();
     const d=new Date(workerSelectedDate);calYear=d.getFullYear();calMonth=d.getMonth();
     workerMode='horas';
-    cargarDesdeServidor().then(ok=>{
-      if(ok){renderPage(currentPage);renderSidebar();}
-    });
+    if(msalToken){cargarDesdeSP().then(()=>{renderPage(currentPage);renderSidebar();});}
     showPage('worker-day');
   }
 }
@@ -1106,368 +930,6 @@ function logout(){
   switchLoginTab('worker');
   save();
 }
-
-// ═══════════════════════════════════════════════════════════
-// FILE SYSTEM ACCESS API
-// Trabajador: guarda Excel diario en su carpeta de red
-// Administrador: lee carpetas de todos los trabajadores
-// ═══════════════════════════════════════════════════════════
-
-// Handles persistentes via IndexedDB
-let _fsWorkerHandle = null;   // DirectoryHandle de la carpeta del trabajador
-let _fsAdminHandle  = null;   // DirectoryHandle de la carpeta raíz IAM_TimeTrack
-
-// ── Persistencia de handles en IndexedDB ──
-async function fsGuardarHandle(key, handle){
-  return new Promise((res,rej)=>{
-    const req=indexedDB.open('iam_tt_fs',1);
-    req.onupgradeneeded=e=>e.target.result.createObjectStore('handles');
-    req.onsuccess=e=>{
-      const tx=e.target.result.transaction('handles','readwrite');
-      tx.objectStore('handles').put(handle,key);
-      tx.oncomplete=()=>res();
-      tx.onerror=()=>rej();
-    };
-    req.onerror=()=>rej();
-  });
-}
-async function fsCargarHandle(key){
-  return new Promise((res)=>{
-    const req=indexedDB.open('iam_tt_fs',1);
-    req.onupgradeneeded=e=>e.target.result.createObjectStore('handles');
-    req.onsuccess=e=>{
-      const tx=e.target.result.transaction('handles','readonly');
-      const r2=tx.objectStore('handles').get(key);
-      r2.onsuccess=()=>res(r2.result||null);
-      r2.onerror=()=>res(null);
-    };
-    req.onerror=()=>res(null);
-  });
-}
-async function fsVerificarPermiso(handle){
-  if(!handle)return false;
-  try{
-    const perm=await handle.queryPermission({mode:'readwrite'});
-    if(perm==='granted')return true;
-    const req=await handle.requestPermission({mode:'readwrite'});
-    return req==='granted';
-  }catch(e){return false;}
-}
-
-// ── Cargar handles guardados al iniciar ──
-async function fsInicializar(){
-  _fsWorkerHandle=await fsCargarHandle('worker_'+session.workerId);
-  _fsAdminHandle =await fsCargarHandle('admin_root');
-  actualizarFsNav();
-}
-
-function actualizarFsNav(){
-  const lbl=document.getElementById('fs-nav-label');
-  if(lbl)lbl.textContent=_fsWorkerHandle?'✓ Carpeta configurada':'Configurar carpeta';
-}
-
-// ══ TRABAJADOR: Configurar carpeta ══
-async function configurarCarpeta(){
-  // Diagnóstico completo
-  console.log('configurarCarpeta() llamada');
-  console.log('Protocolo:', window.location.protocol);
-  console.log('URL:', window.location.href);
-  console.log('showDirectoryPicker disponible:', 'showDirectoryPicker' in window);
-
-  if(window.location.protocol==='file:'){
-    alert('⚠️ Modo local (file://) — El guardado en carpeta no está disponible.\n\nUsa el servidor Python o SharePoint.');
-    return;
-  }
-  if(!('showDirectoryPicker' in window)){
-    alert('❌ Tu navegador no soporta File System Access API.\n\nNecesitas Chrome o Edge versión 86+.\nNavegador actual: '+navigator.userAgent.slice(0,80));
-    return;
-  }
-
-  // Verificar que estamos en contexto seguro
-  if(!window.isSecureContext){
-    alert('❌ La app necesita ejecutarse en HTTPS para acceder a carpetas.\nContexto actual: '+window.location.protocol+'//'+window.location.host);
-    return;
-  }
-
-  // Verificar que no estamos en un iframe (SharePoint a veces embebe en iframe)
-  if(window.self!==window.top){
-    alert('⚠️ La app está cargada dentro de un iframe de SharePoint.\n\nEsto bloquea el acceso a carpetas por seguridad.\n\nSolución: abre el archivo HTML directamente en una pestaña nueva del navegador, no embebido en SharePoint.\n\nURL directa: '+window.location.href);
-    return;
-  }
-
-  try{
-    showSyncStatus('Selecciona tu carpeta personal...',true);
-    console.log('Abriendo showDirectoryPicker...');
-    const handle=await window.showDirectoryPicker({mode:'readwrite',startIn:'documents'});
-    // Verificar que el nombre coincide con el trabajador o preguntar
-    const trab=S.trabajadores.find(x=>x.id===session.workerId);
-    const nombEsperado=trab?(trab.nombre+' '+trab.apellidos).trim():'';
-    if(handle.name!==nombEsperado){
-      const ok=confirm(`Has seleccionado la carpeta "${handle.name}".\n¿Es tu carpeta personal? (Se esperaba "${nombEsperado}")`);
-      if(!ok)return;
-    }
-    _fsWorkerHandle=handle;
-    await fsGuardarHandle('worker_'+session.workerId,handle);
-    actualizarFsNav();
-    updateTopbar();
-    showSyncStatus('✓ Carpeta configurada: '+handle.name,true);
-  }catch(e){
-    console.error('Error en configurarCarpeta:', e.name, e.message);
-    if(e.name==='AbortError'){
-      showSyncStatus('Selección cancelada',false);
-    }else if(e.name==='SecurityError'){
-      alert('❌ Error de seguridad al acceder a carpetas.\n\nSharePoint puede estar bloqueando esta función.\n\nSolución: abre el HTML directamente en una pestaña nueva del navegador (no como página de SharePoint embebida).\n\nError: '+e.message);
-    }else{
-      alert('❌ Error inesperado: '+e.name+' — '+e.message);
-      showSyncStatus('Error al seleccionar carpeta',false);
-    }
-  }
-}
-
-// ══ TRABAJADOR: Guardar día en Excel ══
-async function guardarDiaEnCarpeta(){
-  if(!_fsWorkerHandle){
-    const ok=confirm('No has configurado tu carpeta todavía.\n¿Quieres configurarla ahora?');
-    if(ok)configurarCarpeta();
-    return;
-  }
-  const ok=await fsVerificarPermiso(_fsWorkerHandle);
-  if(!ok){showSyncStatus('Sin permiso para escribir en la carpeta',false);return;}
-
-  const fecha=workerSelectedDate;
-  const regs=S.registros.filter(r=>r.trabajadorId===session.workerId&&r.fecha===fecha);
-  const gasts=S.gastos.filter(g=>g.trabajadorId===session.workerId&&g.fecha===fecha);
-
-  if(!regs.length&&!gasts.length){
-    alert('No hay registros para este día todavía.');
-    return;
-  }
-
-  // Cargar SheetJS si no está
-  if(typeof XLSX==='undefined'){
-    await new Promise((res,rej)=>{
-      const s=document.createElement('script');
-      s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-      s.onload=res;s.onerror=rej;
-      document.head.appendChild(s);
-    });
-  }
-
-  const wb=XLSX.utils.book_new();
-  const trab=S.trabajadores.find(x=>x.id===session.workerId);
-  const nombTrab=trab?trab.nombre+' '+trab.apellidos:'?';
-
-  // ── Hoja HORAS ──
-  const horasRows=[['Fecha','Proyecto','Referencia','Departamento','Tarea','Horas','Notas']];
-  regs.forEach(r=>{
-    const p=S.proyectos.find(x=>x.id===r.proyId);
-    const ta=getTarea(r.tareaId);
-    const dept=ta?getDept(ta.deptId):null;
-    const f=r.fecha;
-    horasRows.push([
-      `${f.slice(8,10)}/${f.slice(5,7)}/${f.slice(0,4)}`,
-      p?p.nombre:'—', p?p.ref:'—',
-      dept?dept.nombre:'—',
-      ta?ta.nombre:'—',
-      r.horas, r.notas||''
-    ]);
-  });
-  if(regs.length){
-    const totalH=regs.reduce((a,r)=>a+r.horas,0);
-    horasRows.push(['','','','','TOTAL',totalH,'']);
-  }
-  const wsH=XLSX.utils.aoa_to_sheet(horasRows);
-  wsH['!cols']=[{wch:12},{wch:20},{wch:10},{wch:14},{wch:20},{wch:8},{wch:20}];
-  XLSX.utils.book_append_sheet(wb,wsH,'Horas');
-
-  // ── Hoja GASTOS ──
-  const gastosRows=[['Fecha','Proyecto','Tarea','Tipo','KM','Importe (€)','Forma pago','Descripción']];
-  gasts.forEach(g=>{
-    const p=S.proyectos.find(x=>x.id===g.proyId);
-    const ta=getTarea(g.tareaId);
-    const t=tipoObj(g.tipo);
-    const f=g.fecha;
-    gastosRows.push([
-      `${f.slice(8,10)}/${f.slice(5,7)}/${f.slice(0,4)}`,
-      p?p.nombre:'—',
-      ta?ta.nombre:'—',
-      t.label,
-      g.km||0,
-      +g.importe||0,
-      g.formaPago||'Empresa',
-      g.desc||''
-    ]);
-  });
-  if(gasts.length){
-    const totalE=gasts.reduce((a,g)=>a+(+g.importe||0),0);
-    gastosRows.push(['','','','','','TOTAL','',eFmt(totalE)]);
-  }
-  const wsG=XLSX.utils.aoa_to_sheet(gastosRows);
-  wsG['!cols']=[{wch:12},{wch:20},{wch:20},{wch:12},{wch:6},{wch:10},{wch:12},{wch:20}];
-  XLSX.utils.book_append_sheet(wb,wsG,'Gastos');
-
-  // ── Hoja RESUMEN ──
-  const resumen=[
-    ['IAM TimeTrack — Registro diario'],
-    ['Trabajador:', nombTrab],
-    ['Fecha:', `${fecha.slice(8,10)}/${fecha.slice(5,7)}/${fecha.slice(0,4)}`],
-    ['Total horas:', regs.reduce((a,r)=>a+r.horas,0)],
-    ['Total gastos:', eFmt(gasts.reduce((a,g)=>a+(+g.importe||0),0))],
-    ['Registros horas:', regs.length],
-    ['Registros gastos:', gasts.length],
-  ];
-  const wsR=XLSX.utils.aoa_to_sheet(resumen);
-  XLSX.utils.book_append_sheet(wb,wsR,'Resumen');
-
-  // Generar bytes
-  const xlsxBytes=XLSX.write(wb,{type:'array',bookType:'xlsx'});
-  const blob=new Blob([xlsxBytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-
-  // Nombre archivo: YYYY-MM-DD.xlsx
-  const fileName=`${fecha}.xlsx`;
-
-  try{
-    // Crear o sobreescribir el archivo
-    const fileHandle=await _fsWorkerHandle.getFileHandle(fileName,{create:true});
-    const writable=await fileHandle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    showSyncStatus(`✓ Guardado: ${fileName}`,true);
-
-    // Marcar el día como guardado en la UI
-    renderWorkerDay();
-  }catch(e){
-    console.error('Error guardando:',e);
-    showSyncStatus('Error al guardar el archivo',false);
-  }
-}
-
-// ══ ADMINISTRADOR: Cargar datos de todo el equipo ══
-async function cargarDatosEquipo(){
-  if(window.location.protocol==='file:'){
-    alert('⚠️ Esta función no está disponible cuando la app se abre como archivo local.\n\nSoluciones:\n\n1. Abre el servidor local: haz doble clic en "iam_timetrack_server.py" y accede desde http://localhost:7432/fichaje-proyectos.html\n\n2. Sube la app a SharePoint y ábrela desde allí.');
-    return;
-  }
-  if(!('showDirectoryPicker' in window)){
-    alert('Tu navegador no soporta esta función.\nUsa Chrome o Edge versión 86 o superior.');
-    return;
-  }
-  try{
-    showSyncStatus('Selecciona la carpeta raíz IAM_TimeTrack...',true);
-    const rootHandle=await window.showDirectoryPicker({mode:'read',startIn:'documents'});
-    _fsAdminHandle=rootHandle;
-    await fsGuardarHandle('admin_root',rootHandle);
-
-    showSyncStatus('⟳ Leyendo datos del equipo...',true);
-    let totalRegs=0,totalGastos=0,errores=[];
-
-    // Iterar por subcarpetas (una por trabajador)
-    for await(const [nombre,handle] of rootHandle.entries()){
-      if(handle.kind!=='directory')continue;
-      // Buscar trabajador por nombre de carpeta
-      const trab=S.trabajadores.find(t=>(t.nombre+' '+t.apellidos).trim()===nombre.trim());
-      if(!trab){errores.push(`Carpeta "${nombre}" no coincide con ningún trabajador`);continue;}
-
-      // Leer todos los .xlsx de la carpeta
-      for await(const [fname,fhandle] of handle.entries()){
-        if(fhandle.kind!=='file'||!fname.endsWith('.xlsx'))continue;
-        // Verificar formato fecha YYYY-MM-DD.xlsx
-        const fechaMatch=fname.match(/^(\d{4}-\d{2}-\d{2})\.xlsx$/);
-        if(!fechaMatch)continue;
-        const fecha=fechaMatch[1];
-
-        try{
-          const file=await fhandle.getFile();
-          const buf=await file.arrayBuffer();
-          if(typeof XLSX==='undefined'){
-            await new Promise((res,rej)=>{
-              const s=document.createElement('script');
-              s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-              s.onload=res;s.onerror=rej;
-              document.head.appendChild(s);
-            });
-          }
-          const wb2=XLSX.read(buf,{type:'array'});
-
-          // Leer hoja Horas
-          const wsH=wb2.Sheets['Horas'];
-          if(wsH){
-            const rows=XLSX.utils.sheet_to_json(wsH,{header:1,defval:''});
-            // Eliminar registros existentes de este trabajador en esta fecha
-            S.registros=S.registros.filter(r=>!(r.trabajadorId===trab.id&&r.fecha===fecha));
-            // Insertar los nuevos (saltando cabecera y fila de total)
-            for(let i=1;i<rows.length;i++){
-              const row=rows[i];
-              if(!row[0]||row[4]==='TOTAL')continue;
-              const [dd,mm,yy]=String(row[0]).split('/');
-              const fechaReg=`${yy}-${mm}-${dd}`;
-              // Buscar tarea por nombre
-              const ta=S.tareas.find(t=>t.nombre===row[4]);
-              const p=S.proyectos.find(p=>p.ref===row[2]);
-              if(!ta||!p)continue;
-              const horas=parseFloat(row[5])||0;
-              if(!horas)continue;
-              S.registros.push({
-                id:uid(),trabajadorId:trab.id,proyId:p.id,tareaId:ta.id,
-                fecha:fechaReg,horas,notas:row[6]||''
-              });
-              totalRegs++;
-            }
-          }
-
-          // Leer hoja Gastos
-          const wsG=wb2.Sheets['Gastos'];
-          if(wsG){
-            const rows=XLSX.utils.sheet_to_json(wsG,{header:1,defval:''});
-            S.gastos=S.gastos.filter(g=>!(g.trabajadorId===trab.id&&g.fecha===fecha));
-            for(let i=1;i<rows.length;i++){
-              const row=rows[i];
-              if(!row[0]||row[3]==='TOTAL')continue;
-              const [dd,mm,yy]=String(row[0]).split('/');
-              const fechaGas=`${yy}-${mm}-${dd}`;
-              const p=S.proyectos.find(p=>p.nombre===row[1]);
-              const ta=S.tareas.find(t=>t.nombre===row[2]);
-              const tipoObj2=TIPOS.find(t=>t.label===row[3]);
-              if(!p||!ta)continue;
-              const importe=parseFloat(row[5])||0;
-              if(!importe)continue;
-              S.gastos.push({
-                id:uid(),trabajadorId:trab.id,proyId:p.id,tareaId:ta.id,
-                tipo:tipoObj2?tipoObj2.id:'otros',importe,km:+row[4]||0,
-                formaPago:row[6]||'Empresa',desc:row[7]||'',fecha:fechaGas,ticket:null
-              });
-              totalGastos++;
-            }
-          }
-        }catch(e){errores.push(`Error leyendo ${nombre}/${fname}: ${e.message}`);}
-      }
-    }
-
-    save();
-    let msg=`✓ Cargados: ${totalRegs} registros de horas, ${totalGastos} gastos`;
-    if(errores.length)msg+=` (${errores.length} avisos)`;
-    showSyncStatus(msg,true);
-    if(errores.length)console.warn('Avisos al cargar equipo:',errores);
-
-    // Actualizar vista
-    renderPage(currentPage);renderSidebar();renderDashboard();
-    alert(`Datos cargados correctamente.\n✓ ${totalRegs} registros de horas\n✓ ${totalGastos} gastos${errores.length?'\n⚠ '+errores.length+' avisos (ver consola)':''}`);
-
-  }catch(e){
-    if(e.name!=='AbortError'){
-      console.error(e);
-      showSyncStatus('Error al cargar carpeta',false);
-    }
-  }
-}
-
-// Inicializar FS al arrancar sesión
-function inicializarFS(){
-  if(session.role==='worker'){
-    fsInicializar();
-  }
-}
-
 
 // ═══════════════════════════════════════════════════════════
 // SHAREPOINT / MSAL INTEGRATION
@@ -1778,41 +1240,8 @@ setInterval(async()=>{
   }
 }, 60000);
 
-// Refresco automático cada 30 segundos
-setInterval(async()=>{
-  if(!session.role)return;
-  // Intentar conectar al servidor
-  try{
-    await serverGet('/ping');
-    if(!_servidorActivo){
-      _servidorActivo=true;
-      // Recién conectado — sincronizar pendientes primero
-      await sincronizarPendientes();
-      showSyncStatus('✓ Servidor disponible — sincronizando...',true);
-    }
-    // Cargar datos frescos
-    const data=await serverGet('/cargar-todo');
-    if(data){
-      S.registros=data.registros||[];
-      S.gastos=data.gastos||[];
-      S.proyectos=data.proyectos||S.proyectos;
-      S.departamentos=data.departamentos||S.departamentos;
-      S.tareas=data.tareas||S.tareas;
-      S.trabajadores=data.trabajadores||S.trabajadores;
-      save();
-      if(currentPage)renderPage(currentPage);
-    }
-  }catch(e){
-    if(_servidorActivo){
-      _servidorActivo=false;
-      showSyncStatus('⚠ Servidor no disponible — trabajando en local',false);
-      actualizarBadgePendientes();
-    }
-  }
-},30000);
 
-// Mostrar pendientes al inicio
-setTimeout(actualizarBadgePendientes, 2000);
+
 
 initMSAL().then(()=>initLogin());
 
@@ -1860,56 +1289,14 @@ function generarHojaGastos(){
   if(!trab)return;
 
   // Preparar datos para enviar al servidor Python local
-  const gastos=S.gastos.filter(g=>g.trabajadorId===trabId&&g.fecha.slice(0,7)===mes)
-    .sort((a,b)=>a.fecha.localeCompare(b.fecha))
-    .map(g=>{
-      const p=S.proyectos.find(x=>x.id===g.proyId);
-      const ta=getTarea(g.tareaId);
-      return{
-        fecha:g.fecha, lugar:p?p.ref:'—', motivo:ta?ta.nombre:'—',
-        km:g.km||0, tipo:g.tipo||'otros', importe:+g.importe||0,
-        formaPago:g.formaPago||'Empresa'
-      };
-    });
-
-  const payload={
-    trabajador:trab.nombre+' '+trab.apellidos,
-    mes, gastos
-  };
-
-  // Intentar servidor Python local (lanzado con iam_timetrack_server.py)
-  fetch('http://localhost:7432/ping',{method:'GET'})
-    .then(r=>{
-      if(r.ok){
-        // Servidor disponible — generar con Python (calidad máxima)
-        showSyncStatus&&showSyncStatus('⟳ Generando Excel...',true);
-        return fetch('http://localhost:7432/generar-excel',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify(payload)
-        });
-      }else throw new Error('sin servidor');
-    })
-    .then(r=>r.blob())
-    .then(blob=>{
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      const apellido=(trab.apellidos||trab.nombre).replace(/\s+/g,'_');
-      a.href=url;a.download=`HojaGastos_${apellido}_${mes}.xlsx`;
-      a.click();URL.revokeObjectURL(url);
-      showSyncStatus&&showSyncStatus('✓ Excel generado con logo',true);
-    })
-    .catch(()=>{
-      // Fallback: SheetJS en el navegador
-      console.log('Servidor local no disponible, usando SheetJS...');
-      if(typeof XLSX==='undefined'){
-        const s=document.createElement('script');
-        s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-        s.onload=()=>_buildHojaGastos(trabId,mes);
-        s.onerror=()=>alert('Error cargando librería Excel.');
-        document.head.appendChild(s);
-      }else{_buildHojaGastos(trabId,mes);}
-    });
+  // Generar Excel con SheetJS
+  if(typeof XLSX==='undefined'){
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload=()=>_buildHojaGastos(trabId,mes);
+    s.onerror=()=>alert('Error cargando librería Excel.');
+    document.head.appendChild(s);
+  }else{_buildHojaGastos(trabId,mes);}
 }
 
 function _buildHojaGastos(trabId,mes){
@@ -2629,11 +2016,10 @@ function updateTopbar(){
         <button class="btn btn-sm" onclick="openModal('modal-pin')">⚙ Cambiar PIN</button>`;
   }else{
     if(currentPage==='worker-day'){
-      const fsBtn=(typeof _fsWorkerHandle!=='undefined'&&_fsWorkerHandle)?`<button class="btn btn-sm" style="background:var(--accent-dim);color:var(--accent);border-color:var(--accent-border);" onclick="guardarDiaEnCarpeta()">💾 Guardar día</button>`:'';
       if(workerMode==='horas')
-        acts.innerHTML=fsBtn+`<button class="btn btn-accent btn-sm" onclick="abrirModalHoras()">+ Añadir horas</button>`;
+        acts.innerHTML=`<button class="btn btn-accent btn-sm" onclick="abrirModalHoras()">+ Añadir horas</button>`;
       else
-        acts.innerHTML=fsBtn+`<button class="btn btn-amber btn-sm" onclick="abrirModalGasto()">+ Añadir gasto</button>`;
+        acts.innerHTML=`<button class="btn btn-amber btn-sm" onclick="abrirModalGasto()">+ Añadir gasto</button>`;
     }else if(currentPage==='worker-cal'){
       acts.innerHTML=`<button class="btn btn-sm" onclick="abrirModalHojaGastos('worker')">📋 Mi hoja de gastos</button>`;
     }
@@ -3066,27 +2452,11 @@ function renderWorkerDay(){
     }
   }
 
-  // Botón guardar: siempre visible
-  // Si hay carpeta configurada → guarda; si no → abre configuración
-  const tieneCarpeta=(typeof _fsWorkerHandle!=='undefined'&&_fsWorkerHandle);
-  const saveDayBtn=tieneCarpeta
-    ?`<button class="btn btn-sm" style="background:var(--accent-dim);color:var(--accent);border-color:var(--accent-border);font-size:12px;" onclick="guardarDiaEnCarpeta()">💾 Guardar día</button>`
-    :`<button class="btn btn-sm" style="background:var(--amber-dim);color:var(--amber);border-color:var(--amber-border);font-size:12px;" onclick="configurarCarpeta()" title="Configura tu carpeta para guardar automáticamente">📁 Configurar carpeta</button>`;
-
-  const esLocal=window.location.protocol==='file:';
-  const bannerLocal=esLocal?`<div style="background:rgba(240,168,50,0.15);border:1px solid var(--amber-border);border-radius:var(--radius);padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--amber);display:flex;align-items:center;gap:10px;">
-    <span style="font-size:18px;">⚠️</span>
-    <div><strong>Modo local</strong> — El guardado automático en carpeta no está disponible. 
-    Para activarlo abre la app desde el servidor: <strong>doble clic en iam_timetrack_server.py</strong></div>
-  </div>`:'';
-
   document.getElementById('worker-day-content').innerHTML=`
-    ${bannerLocal}
     <div class="day-nav">
       <button class="btn btn-sm btn-icon" onclick="navDay(-1)">‹</button>
       <div class="day-nav-date"><div class="day-nav-date-main">${fmtFechaLarga(workerSelectedDate)}</div><div class="day-nav-date-sub">${isToday?'Hoy':'Día pasado'}</div></div>
       <button class="btn btn-sm btn-icon" onclick="navDay(1)" ${!canGoNext?'disabled style="opacity:0.3;"':''}>›</button>
-      ${saveDayBtn}
     </div>
     ${tabsHtml}
     ${entriesHtml}`;
