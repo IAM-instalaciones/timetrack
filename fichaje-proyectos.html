@@ -914,16 +914,20 @@ function startApp(){
     if(adminNav) adminNav.style.display='flex';
     if(workerNav) workerNav.style.display='none';
     // Cargar desde SP si hay token, si no usar datos locales
+    showPage('dashboard');
     if(msalToken){
       cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});
     }else{
-      // Intentar recuperar token silenciosamente
       getToken().then(token=>{
-        if(token){cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});}
-        else{renderPage('dashboard');renderSidebar();}
-      });
+        if(token){
+          msalToken=token;
+          cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});
+        }else{
+          renderPage('dashboard');
+          renderSidebar();
+        }
+      }).catch(()=>{renderPage('dashboard');renderSidebar();});
     }
-    showPage('dashboard');
   }else{
     const w=S.trabajadores.find(x=>x.id===session.workerId);
     if(badge){badge.textContent=w?w.nombre:'?';badge.className='s-badge s-badge-worker';}
@@ -932,15 +936,20 @@ function startApp(){
     workerSelectedDate=todayStr();
     const d=new Date(workerSelectedDate);calYear=d.getFullYear();calMonth=d.getMonth();
     workerMode='horas';
+    showPage('worker-day');
     if(msalToken){
       cargarDesdeSP().then(()=>{renderPage(currentPage);renderSidebar();});
     }else{
       getToken().then(token=>{
-        if(token){cargarDesdeSP().then(()=>{renderPage(currentPage);renderSidebar();});}
-        else{renderPage(currentPage);renderSidebar();}
-      });
+        if(token){
+          msalToken=token;
+          cargarDesdeSP().then(()=>{renderPage(currentPage);renderSidebar();});
+        }else{
+          renderPage(currentPage);
+          renderSidebar();
+        }
+      }).catch(()=>{renderPage(currentPage);renderSidebar();});
     }
-    showPage('worker-day');
   }
 }
 function logout(){
@@ -1240,7 +1249,7 @@ async function completarLoginMSAL(){
           badge.textContent='Admin';badge.className='s-badge s-badge-admin';
           document.getElementById('admin-nav').style.display='flex';
           document.getElementById('worker-nav').style.display='none';
-          cargarDesdeServidor().then(ok=>{if(ok){renderPage('dashboard');renderSidebar();}});
+          if(msalToken){cargarDesdeSP().then(()=>{renderPage('dashboard');renderSidebar();});}else{renderPage('dashboard');renderSidebar();}
           showPage('dashboard');
           return true;
         }
