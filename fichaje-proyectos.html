@@ -399,7 +399,30 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
     <!-- ADMIN NAV -->
     <div id="admin-nav" style="display:none;flex:1;overflow:hidden;flex-direction:column;">
       <div class="sb-section">
-        <div class="sb-label">General</div>      </div>
+        <div class="sb-label">General</div>
+        <div class="nav-item" onclick="showPage('dashboard')" id="nav-dashboard"><span style="width:16px;text-align:center;">◈</span>Dashboard</div>
+        <div class="nav-item" onclick="showPage('fichajes')" id="nav-fichajes"><span style="width:16px;text-align:center;">◷</span>Fichajes</div>
+        <div class="nav-item" onclick="showPage('gastos-admin')" id="nav-gastos-admin"><span style="width:16px;text-align:center;">€</span>Gastos</div>
+        <div class="nav-item" onclick="showPage('trabajadores')" id="nav-trabajadores"><span style="width:16px;text-align:center;">◉</span>Trabajadores</div>
+        <div class="nav-item" onclick="showPage('depts')" id="nav-depts"><span style="width:16px;text-align:center;">▤</span>Depts. y Tareas</div>
+        <div class="nav-item" onclick="showPage('informe')" id="nav-informe"><span style="width:16px;text-align:center;">◈</span>Informe</div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Proyectos</div>
+        <div id="sidebar-proj-list"></div>
+      </div>
+    </div>
+    <!-- WORKER NAV -->
+    <div id="worker-nav" style="display:none;flex:1;overflow:hidden;flex-direction:column;">
+      <div class="sb-section">
+        <div class="sb-label">Mi actividad</div>
+        <div class="nav-item" onclick="showPage('worker-day')" id="nav-worker-day"><span style="width:16px;text-align:center;">◷</span>Hoy</div>
+        <div class="nav-item" onclick="showPage('worker-cal')" id="nav-worker-cal"><span style="width:16px;text-align:center;">▦</span>Calendario</div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Proyectos</div>
+        <div id="sidebar-proj-list-worker"></div>
+      </div>
     </div>
     <div style="padding:12px 16px;border-top:1px solid var(--border);">
       <button class="btn btn-sm w100" onclick="logout()">↩ Cambiar sesión</button>
@@ -2074,10 +2097,12 @@ function renderPage(page){
 
 // ═══ SIDEBAR ═══
 function renderSidebar(){
-  const list=document.getElementById('sidebar-proj-list');if(!list)return;
-  const roots=S.proyectos.filter(p=>!p.parentId);
-  if(!roots.length){list.innerHTML=`<div style="padding:8px 16px;font-size:12px;color:var(--muted);">Sin proyectos</div>`;return;}
-  list.innerHTML=roots.map(p=>renderSidebarProj(p,0)).join('');
+  const html=S.proyectos.filter(p=>!p.parentId).map(p=>renderSidebarProj(p,0)).join('');
+  const fallback=`<div style="padding:8px 16px;font-size:12px;color:var(--muted);">Sin proyectos</div>`;
+  const list=document.getElementById('sidebar-proj-list');
+  if(list) list.innerHTML=html||fallback;
+  const listW=document.getElementById('sidebar-proj-list-worker');
+  if(listW) listW.innerHTML=html||fallback;
 }
 function renderSidebarProj(p,d){
   const children=S.proyectos.filter(x=>x.parentId===p.id);
@@ -2661,12 +2686,15 @@ function guardarHoras(){
   if(cH.editId){reg=S.registros.find(x=>x.id===cH.editId);if(reg){reg.proyId=cH.proyId;reg.tareaId=cH.tareaId;reg.horas=horas;reg.notas=notas;}}
   else{reg={id:uid(),trabajadorId:session.workerId,proyId:cH.proyId,tareaId:cH.tareaId,fecha:workerSelectedDate,horas,notas};S.registros.push(reg);}
   save();closeModal('modal-horas');renderPage(currentPage);
+  if(reg) syncRegistro(reg);
 }
 function deleteHoras(){
   if(!confirm('¿Eliminar?'))return;
   const id=cH.editId;
+  const trabId=session.workerId;
   S.registros=S.registros.filter(x=>x.id!==id);
   save();closeModal('modal-horas');renderPage(currentPage);
+  deleteRegistroServidor(trabId,id);
 }
 
 // ═══ WORKER: MODAL GASTO ═══
