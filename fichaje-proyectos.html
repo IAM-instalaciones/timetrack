@@ -93,9 +93,9 @@ window._doMSLogin = function(){
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#0f0f0f;--bg2:#161616;--bg3:#1e1e1e;--bg4:#252525;
-  --border:#2a2020;--border2:#3a2828;
-  --text:#e8e6e0;--muted:#8a7e7e;
+  --bg:#f5f5f5;--bg2:#ffffff;--bg3:#f0f0f0;--bg4:#e8e8e8;
+  --border:#e0e0e0;--border2:#cccccc;
+  --text:#1a1a1a;--muted:#6b7280;
   --accent:#c0272d;--accent-dim:rgba(192,39,45,0.14);--accent-border:rgba(192,39,45,0.4);
   --red:#f05a5a;--red-dim:rgba(240,90,90,0.12);
   --amber:#f0a832;--amber-dim:rgba(240,168,50,0.12);--amber-border:rgba(240,168,50,0.3);
@@ -504,6 +504,11 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
       </div>
 
       <!-- WORKER DAY -->
+      <!-- DEPTS Y TAREAS -->
+      <div class="page" id="page-depts">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" id="depts-content"></div>
+      </div>
+
       <div class="page" id="page-worker-day"><div class="worker-screen" id="worker-day-content"></div></div>
 
       <!-- WORKER CAL -->
@@ -1386,7 +1391,7 @@ function _buildHojaGastos(trabId,mes){
     };
   }
   function sc(v,bold,sz,h,v2,wrap){return{v:v??'',t:typeof v==='number'?'n':'s',s:s(bold,sz,h,v2,wrap)};}
-  function sf(f,bold,sz,h){return{f,t:'n',s:s(bold,sz,h)};}
+  function sf(f,bold,sz,h){return{f,t:'n',z:'#,##0.00',s:s(bold,sz,h)};}
   function W(r,c,obj){ws[E(r,c)]=obj;}
 
   // ── Layout ──
@@ -1444,33 +1449,37 @@ function _buildHojaGastos(trabId,mes){
     W(r,0,sc(f?`${f.slice(8,10)}/${f.slice(5,7)}/${f.slice(0,4)}`:'' ,false,12));
     W(r,1,sc(p?p.ref:'—',   false,12));
     W(r,2,sc(ta?ta.nombre:'—',false,12));
-    if(g.km)W(r,3,sc(+g.km,false,12,'center'));
+    const km = g.km ? +g.km : null;
+    if(km) W(r,3,{v:km,t:'n',s:s(false,12,'center')});
     const colImp=TIPO_COL[g.tipo||'otros']??7;
     const imp=+(+g.importe||0);
-    if(imp)W(r,colImp,sc(imp,false,12,'center'));
+    if(imp) W(r,colImp,{v:imp,t:'n',s:s(false,12,'center')});
     W(r,9,sc(g.formaPago||'Empresa',false,12));
   });
 
   // ── FILA 23: TOTAL KM / TOTAL GASTOS ──
+  // Calcular totales directamente de los datos (SheetJS community no evalúa fórmulas)
+  const totalKm = gastos.slice(0,16).reduce((a,g)=>a+(+g.km||0),0);
+  const totalGastos = gastos.slice(0,16).reduce((a,g)=>a+(+g.importe||0),0);
   mg(23,0,23,2); mg(23,6,23,7);
   W(23,0,sc('TOTAL DE KM', true,12));
-  W(23,3,sf(`SUM(D${DSTART+1}:D${DEND+1})`,false,12,'center'));
+  W(23,3,{v:totalKm,t:'n',s:s(true,12,'center')});
   W(23,6,sc('TOTAL GASTOS',true,12));
-  W(23,8,sf(`SUM(I${DSTART+1}:I${DEND+1})`,false,12,'center'));
+  W(23,8,{v:+totalGastos.toFixed(2),t:'n',s:s(true,12,'center')});
 
   // ── FILA 25: PAGO TRABAJADOR ──
-  const fT=Array.from({length:16},(_,i)=>`IF(J${DSTART+1+i}="Trabajador",I${DSTART+1+i},0)`).join('+');
+  const pagoTrab = +gastos.slice(0,16).filter(g=>(g.formaPago||'Empresa')==='Trabajador').reduce((a,g)=>a+(+g.importe||0),0).toFixed(2);
+  const pagoEmp  = +gastos.slice(0,16).filter(g=>(g.formaPago||'Empresa')==='Empresa').reduce((a,g)=>a+(+g.importe||0),0).toFixed(2);
   mg(25,0,25,1); mg(25,2,25,5); mg(25,6,25,7); mg(25,8,25,9);
   W(25,0,sc('PAGO DEL TRABAJADOR',true,12));
-  W(25,2,sf(fT,false,12,'center'));
+  W(25,2,{v:pagoTrab,t:'n',s:s(false,12,'center')});
   W(25,6,sc('TOTAL ADEUDADO',true,12));
-  W(25,8,sf('C26',false,12,'center'));
+  W(25,8,{v:pagoTrab,t:'n',s:s(false,12,'center')});
 
   // ── FILA 26: PAGO EMPRESA ──
-  const fE=Array.from({length:16},(_,i)=>`IF(J${DSTART+1+i}="Empresa",I${DSTART+1+i},0)`).join('+');
   mg(26,0,26,1); mg(26,2,26,5);
   W(26,0,sc('PAGO DE EMPRESA',true,12));
-  W(26,2,sf(fE,false,12,'center'));
+  W(26,2,{v:pagoEmp,t:'n',s:s(false,12,'center')});
 
   // ── FILA 28: Firmas etiquetas ──
   mg(28,0,28,2); mg(28,3,28,5); mg(28,6,28,9);
@@ -2045,7 +2054,7 @@ function showPage(page,data){
 function updateTopbar(){
   const titles={dashboard:'Dashboard',fichajes:'Fichajes','gastos-admin':'Gastos',
     trabajadores:'Trabajadores',departamentos:'Departamentos y Tareas',
-    informe:'Informe','worker-day':'Registro diario','worker-cal':'Calendario',proyecto:''};
+    informe:'Informe','worker-day':'Registro diario','worker-cal':'Calendario',proyecto:'',depts:'Depts. y Tareas'};
   let t=titles[currentPage]||'',sub='';
   if(currentPage==='proyecto'&&currentProjId){const p=S.proyectos.find(x=>x.id===currentProjId);if(p){t=p.nombre;sub=p.ref+(p.cliente?' · '+p.cliente:'');}}
   document.getElementById('topbar-title').textContent=t;
@@ -2096,6 +2105,48 @@ function renderPage(page){
 }
 
 // ═══ SIDEBAR ═══
+// ═══ ADMIN: DEPTS Y TAREAS ═══
+function renderDepts(){
+  const el=document.getElementById('depts-content');
+  if(!el)return;
+  if(!S.departamentos.length){
+    el.innerHTML=`<div class="card" style="grid-column:1/-1;padding:32px;text-align:center;color:var(--muted);">Sin departamentos. Añade uno con el botón +.</div>`;
+    return;
+  }
+  el.innerHTML=S.departamentos.map(d=>{
+    const tareas=S.tareas.filter(t=>t.deptId===d.id);
+    return`<div class="card">
+      <div class="card-header">
+        <div class="card-title" style="display:flex;align-items:center;gap:8px;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${d.color||'#888'};flex-shrink:0;display:inline-block;"></span>
+          ${esc(d.nombre)}
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" onclick="openModalDept('${d.id}')">✎</button>
+          <button class="btn btn-sm btn-accent" onclick="openModalTarea(null,'${d.id}')">+ Tarea</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">
+        ${tareas.length?tareas.map(t=>`
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:13px;">
+            <span>${esc(t.nombre)}</span>
+            <div style="display:flex;gap:4px;">
+              <button class="btn btn-sm" onclick="openModalTarea('${t.id}','${d.id}')">✎</button>
+              <button class="btn btn-sm" style="color:var(--red);" onclick="deleteTareaDirecto('${t.id}')">✕</button>
+            </div>
+          </div>`).join('')
+        :`<div style="color:var(--muted);font-size:12px;padding:8px;">Sin tareas</div>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function deleteTareaDirecto(id){
+  if(!confirm('¿Eliminar tarea?'))return;
+  S.tareas=S.tareas.filter(t=>t.id!==id);
+  save();renderDepts();syncConfig();
+}
+
 function renderSidebar(){
   const html=S.proyectos.filter(p=>!p.parentId).map(p=>renderSidebarProj(p,0)).join('');
   const fallback=`<div style="padding:8px 16px;font-size:12px;color:var(--muted);">Sin proyectos</div>`;
@@ -2949,9 +3000,11 @@ function saveProyecto(){
   const nombre=document.getElementById('mproy-nombre').value.trim(),ref=document.getElementById('mproy-ref').value.trim();
   if(!nombre||!ref)return alert('Nombre y referencia obligatorios.');
   const parentId=document.getElementById('mproy-parent').value||null;
-  if(editingProjId){const p=S.proyectos.find(x=>x.id===editingProjId);Object.assign(p,{nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId});}
-  else S.proyectos.push({id:uid(),nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId,creado:new Date().toISOString()});
+  let p;
+  if(editingProjId){p=S.proyectos.find(x=>x.id===editingProjId);Object.assign(p,{nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId});}
+  else{p={id:uid(),nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId,creado:new Date().toISOString()};S.proyectos.push(p);}
   save();closeModal('modal-proyecto');renderPage(currentPage);renderSidebar();
+  if(p)spGuardar('proyectos',p);
 }
 function deleteProyecto(){
   if(!confirm('¿Eliminar proyecto y sus datos?'))return;
@@ -2960,6 +3013,7 @@ function deleteProyecto(){
   S.registros=S.registros.filter(r=>r.proyId!==id);
   S.gastos=S.gastos.filter(g=>g.proyId!==id);
   save();closeModal('modal-proyecto');showPage('dashboard');
+  spEliminar('proyectos',id);
 }
 function openModalDept(id){
   editingDeptId=id||null;const d=id?getDept(id):null;
@@ -3004,8 +3058,10 @@ function saveTarea(){
 }
 function deleteTarea(){
   if(!confirm('¿Eliminar tarea?'))return;
-  S.tareas=S.tareas.filter(x=>x.id!==editingTareaId);
+  const id=editingTareaId;
+  S.tareas=S.tareas.filter(x=>x.id!==id);
   save();closeModal('modal-tarea');renderPage(currentPage);
+  spEliminar('tareas',id);
 }
 function openModalTrabajador(id){
   editingTrabId=id||null;const t=id?S.trabajadores.find(x=>x.id===id):null;
@@ -3016,11 +3072,25 @@ function openModalTrabajador(id){
 }
 function saveTrabajador(){
   const nombre=document.getElementById('mtrab-nombre').value.trim();if(!nombre)return alert('Nombre obligatorio.');
-  if(editingTrabId){const t=S.trabajadores.find(x=>x.id===editingTrabId);t.nombre=nombre;t.apellidos=document.getElementById('mtrab-apellidos').value.trim();t.cargo=document.getElementById('mtrab-cargo').value.trim();}
-  else S.trabajadores.push({id:uid(),nombre,apellidos:document.getElementById('mtrab-apellidos').value.trim(),cargo:document.getElementById('mtrab-cargo').value.trim()});
-  save();closeModal('modal-trabajador');renderPage(currentPage);
+  if(editingTrabId){
+    const t=S.trabajadores.find(x=>x.id===editingTrabId);
+    t.nombre=nombre;t.apellidos=document.getElementById('mtrab-apellidos').value.trim();t.cargo=document.getElementById('mtrab-cargo').value.trim();
+    save();closeModal('modal-trabajador');renderPage(currentPage);
+    spGuardar('trabajadores',t);
+  }else{
+    const t={id:uid(),nombre,apellidos:document.getElementById('mtrab-apellidos').value.trim(),cargo:document.getElementById('mtrab-cargo').value.trim()};
+    S.trabajadores.push(t);
+    save();closeModal('modal-trabajador');renderPage(currentPage);
+    spGuardar('trabajadores',t);
+  }
 }
-function deleteTrabajador(){if(!confirm('¿Eliminar?'))return;const id=editingTrabId;S.trabajadores=S.trabajadores.filter(x=>x.id!==id);save();closeModal('modal-trabajador');renderPage(currentPage);spEliminar('trabajadores',id);}
+function deleteTrabajador(){
+  if(!confirm('¿Eliminar?'))return;
+  const id=editingTrabId;
+  S.trabajadores=S.trabajadores.filter(x=>x.id!==id);
+  save();closeModal('modal-trabajador');renderPage(currentPage);
+  spEliminar('trabajadores',id);
+}
 function savePin(){
   const actual=document.getElementById('pin-actual').value,nuevo=document.getElementById('pin-nuevo').value,conf=document.getElementById('pin-conf').value;
   const err=document.getElementById('pin-change-err');
