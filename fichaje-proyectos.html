@@ -404,7 +404,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
         <div class="nav-item" onclick="showPage('fichajes')" id="nav-fichajes"><span style="width:16px;text-align:center;">◷</span>Fichajes</div>
         <div class="nav-item" onclick="showPage('gastos-admin')" id="nav-gastos-admin"><span style="width:16px;text-align:center;">€</span>Gastos</div>
         <div class="nav-item" onclick="showPage('trabajadores')" id="nav-trabajadores"><span style="width:16px;text-align:center;">◉</span>Trabajadores</div>
-        <div class="nav-item" onclick="showPage('depts')" id="nav-depts"><span style="width:16px;text-align:center;">▤</span>Depts. y Tareas</div>
+        <div class="nav-item" onclick="showPage('departamentos')" id="nav-depts"><span style="width:16px;text-align:center;">▤</span>Depts. y Tareas</div>
         <div class="nav-item" onclick="showPage('informe')" id="nav-informe"><span style="width:16px;text-align:center;">◈</span>Informe</div>
       </div>
       <div class="sb-section">
@@ -504,11 +504,6 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
       </div>
 
       <!-- WORKER DAY -->
-      <!-- DEPTS Y TAREAS -->
-      <div class="page" id="page-depts">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" id="depts-content"></div>
-      </div>
-
       <div class="page" id="page-worker-day"><div class="worker-screen" id="worker-day-content"></div></div>
 
       <!-- WORKER CAL -->
@@ -2054,7 +2049,7 @@ function showPage(page,data){
 function updateTopbar(){
   const titles={dashboard:'Dashboard',fichajes:'Fichajes','gastos-admin':'Gastos',
     trabajadores:'Trabajadores',departamentos:'Departamentos y Tareas',
-    informe:'Informe','worker-day':'Registro diario','worker-cal':'Calendario',proyecto:'',depts:'Depts. y Tareas'};
+    informe:'Informe','worker-day':'Registro diario','worker-cal':'Calendario',proyecto:'',depts:'Depts. y Tareas',departamentos:'Depts. y Tareas'};
   let t=titles[currentPage]||'',sub='';
   if(currentPage==='proyecto'&&currentProjId){const p=S.proyectos.find(x=>x.id===currentProjId);if(p){t=p.nombre;sub=p.ref+(p.cliente?' · '+p.cliente:'');}}
   document.getElementById('topbar-title').textContent=t;
@@ -2065,6 +2060,8 @@ function updateTopbar(){
       acts.innerHTML=`<button class="btn btn-sm" onclick="showPage('dashboard')">← Volver</button>
         <button class="btn btn-sm btn-icon" onclick="openModalProyecto(currentProjId)">✎ Editar</button>
         <button class="btn btn-sm" onclick="openModalProyecto(null,currentProjId)">+ Subproyecto</button>`;
+    else if(currentPage==='dashboard')
+      acts.innerHTML=`<button class="btn btn-accent btn-sm" onclick="openModalProyecto()">+ Proyecto</button>`;
     else if(currentPage==='trabajadores')
       acts.innerHTML=`<button class="btn btn-accent" onclick="openModalTrabajador()">+ Trabajador</button>`;
     else if(currentPage==='fichajes')
@@ -2098,54 +2095,13 @@ function renderPage(page){
   else if(page==='fichajes')renderFichajes();
   else if(page==='gastos-admin')renderGastosAdmin();
   else if(page==='trabajadores')renderTrabajadores();
-  else if(page==='departamentos')renderDepartamentos();
+  else if(page==='departamentos'||page==='depts')renderDepartamentos();
   else if(page==='informe')renderInforme();
   else if(page==='worker-day')renderWorkerDay();
   else if(page==='worker-cal')renderWorkerCal();
 }
 
 // ═══ SIDEBAR ═══
-// ═══ ADMIN: DEPTS Y TAREAS ═══
-function renderDepts(){
-  const el=document.getElementById('depts-content');
-  if(!el)return;
-  if(!S.departamentos.length){
-    el.innerHTML=`<div class="card" style="grid-column:1/-1;padding:32px;text-align:center;color:var(--muted);">Sin departamentos. Añade uno con el botón +.</div>`;
-    return;
-  }
-  el.innerHTML=S.departamentos.map(d=>{
-    const tareas=S.tareas.filter(t=>t.deptId===d.id);
-    return`<div class="card">
-      <div class="card-header">
-        <div class="card-title" style="display:flex;align-items:center;gap:8px;">
-          <span style="width:10px;height:10px;border-radius:50%;background:${d.color||'#888'};flex-shrink:0;display:inline-block;"></span>
-          ${esc(d.nombre)}
-        </div>
-        <div style="display:flex;gap:6px;">
-          <button class="btn btn-sm" onclick="openModalDept('${d.id}')">✎</button>
-          <button class="btn btn-sm btn-accent" onclick="openModalTarea(null,'${d.id}')">+ Tarea</button>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">
-        ${tareas.length?tareas.map(t=>`
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:13px;">
-            <span>${esc(t.nombre)}</span>
-            <div style="display:flex;gap:4px;">
-              <button class="btn btn-sm" onclick="openModalTarea('${t.id}','${d.id}')">✎</button>
-              <button class="btn btn-sm" style="color:var(--red);" onclick="deleteTareaDirecto('${t.id}')">✕</button>
-            </div>
-          </div>`).join('')
-        :`<div style="color:var(--muted);font-size:12px;padding:8px;">Sin tareas</div>`}
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function deleteTareaDirecto(id){
-  if(!confirm('¿Eliminar tarea?'))return;
-  S.tareas=S.tareas.filter(t=>t.id!==id);
-  save();renderDepts();syncConfig();
-}
 
 function renderSidebar(){
   const html=S.proyectos.filter(p=>!p.parentId).map(p=>renderSidebarProj(p,0)).join('');
@@ -3039,12 +2995,12 @@ function deleteDept(){
   save();closeModal('modal-dept');renderPage(currentPage);
   syncConfig();
 }
-function openModalTarea(id){
+function openModalTarea(id, preDeptId){
   editingTareaId=id||null;const ta=id?getTarea(id):null;
-  document.getElementById('mtarea-title').textContent=ta?'Editar tarea global':'Nueva tarea global';
+  document.getElementById('mtarea-title').textContent=ta?'Editar tarea':'Nueva tarea';
   document.getElementById('mtarea-nombre').value=ta?.nombre||'';document.getElementById('mtarea-desc').value=ta?.desc||'';
   document.getElementById('mtarea-del-btn').style.display=ta?'inline-flex':'none';
-  const preDept=ta?ta.deptId:(filterDeptId||null);
+  const preDept=ta?ta.deptId:(preDeptId||filterDeptId||null);
   document.getElementById('mtarea-dept').innerHTML=`<option value="">Sin departamento</option>`+S.departamentos.map(d=>`<option value="${d.id}" ${preDept===d.id?'selected':''}>${esc(d.nombre)}</option>`).join('');
   openModal('modal-tarea');
 }
