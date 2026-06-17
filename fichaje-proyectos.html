@@ -413,6 +413,9 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
             <div class="sb-label" style="padding:0;">Proyectos</div>
             <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;" onclick="openModalProyecto()">+</button>
           </div>
+          <div style="padding:0 12px 8px;">
+            <input type="text" placeholder="Buscar nº o nombre..." oninput="filtrarProyectosSidebar(this.value)" style="width:100%;padding:6px 10px;font-size:12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+          </div>
           <div id="sidebar-proj-list"></div>
         </div>
       </div>
@@ -427,6 +430,9 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
       <div style="flex:1;overflow-y:auto;padding-bottom:8px;">
         <div class="sb-section">
           <div class="sb-label">Proyectos</div>
+          <div style="padding:0 12px 8px;">
+            <input type="text" placeholder="Buscar nº o nombre..." oninput="filtrarProyectosSidebar(this.value)" style="width:100%;padding:6px 10px;font-size:12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+          </div>
           <div id="sidebar-proj-list-worker"></div>
         </div>
       </div>
@@ -1119,6 +1125,25 @@ async function spEliminar(list, objId){
 }
 
 // Cargar todos los datos desde SharePoint
+// ── Sistema de "tumbas": IDs eliminados localmente que no deben reaparecer ──
+function _getTumbas(){
+  try{return JSON.parse(localStorage.getItem('tt_tumbas')||'{}');}catch{return{};}
+}
+function _addTumba(list,id){
+  const t=_getTumbas();
+  if(!t[list])t[list]=[];
+  if(!t[list].includes(id))t[list].push(id);
+  // Limitar a 500 tumbas por lista para no crecer indefinidamente
+  if(t[list].length>500)t[list]=t[list].slice(-500);
+  localStorage.setItem('tt_tumbas',JSON.stringify(t));
+}
+function _filtrarTumbas(list,arr){
+  const t=_getTumbas();
+  if(!t[list]||!t[list].length)return arr;
+  const tumbaSet=new Set(t[list]);
+  return arr.filter(x=>x&&!tumbaSet.has(x.id));
+}
+
 async function cargarDesdeSP(){
   showSyncStatus('⟳ Cargando datos de SharePoint...', true);
   try{
@@ -1133,12 +1158,12 @@ async function cargarDesdeSP(){
     ]);
     // Deduplicar por id al cargar de SP
     function dedup(arr){const seen=new Set();return arr.filter(x=>{if(!x||!x.id||seen.has(x.id))return false;seen.add(x.id);return true;});}
-    if(proy.value.length)    S.proyectos     = dedup(proy.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}}));
-    if(depts.value.length)   S.departamentos = dedup(depts.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}}));
-    if(tareas.value.length)  S.tareas        = dedup(tareas.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}}));
-    if(regs.value.length)    S.registros     = dedup(regs.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}}));
-    if(gastos.value.length)  S.gastos        = dedup(gastos.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}}));
-    if(trabs.value.length)   S.trabajadores  = dedup(trabs.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}}));
+    if(proy.value.length)    S.proyectos     = _filtrarTumbas('proyectos',    dedup(proy.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+    if(depts.value.length)   S.departamentos = _filtrarTumbas('departamentos',dedup(depts.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+    if(tareas.value.length)  S.tareas        = _filtrarTumbas('tareas',       dedup(tareas.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+    if(regs.value.length)    S.registros     = _filtrarTumbas('registros',    dedup(regs.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+    if(gastos.value.length)  S.gastos        = _filtrarTumbas('gastos',       dedup(gastos.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+    if(trabs.value.length)   S.trabajadores  = _filtrarTumbas('trabajadores', dedup(trabs.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
     const pinCfg = cfgs.value.find(i=>i.Title==='pin');
     if(pinCfg) S.pin = JSON.parse(pinCfg.SPData).value;
     save();
@@ -2122,20 +2147,44 @@ function renderPage(page){
 
 // ═══ SIDEBAR ═══
 
+// Horas totales de un proyecto (incluye subproyectos)
+function _horasProyectoTotal(p){
+  const idsIncluidos=[p.id,...S.proyectos.filter(x=>x.parentId===p.id).map(x=>x.id)];
+  return S.registros.filter(r=>idsIncluidos.includes(r.proyId)).reduce((a,r)=>a+(+r.horas||0),0);
+}
+let sidebarProjFilter='';
+function filtrarProyectosSidebar(valor){
+  sidebarProjFilter=(valor||'').toLowerCase().trim();
+  renderSidebar();
+}
 function renderSidebar(){
-  const html=S.proyectos.filter(p=>!p.parentId).map(p=>renderSidebarProj(p,0)).join('');
-  const fallback=`<div style="padding:8px 16px;font-size:12px;color:var(--muted);">Sin proyectos</div>`;
+  const filtro=sidebarProjFilter;
+  let roots=S.proyectos.filter(p=>!p.parentId);
+  // Ordenar por horas totales invertidas (descendente)
+  roots=roots.map(p=>({p,h:_horasProyectoTotal(p)})).sort((a,b)=>b.h-a.h).map(x=>x.p);
+  if(filtro){
+    roots=roots.filter(p=>{
+      const enRaiz=p.nombre.toLowerCase().includes(filtro)||p.ref.toLowerCase().includes(filtro)||(p.cliente||'').toLowerCase().includes(filtro);
+      const enHijos=S.proyectos.some(c=>c.parentId===p.id&&(c.nombre.toLowerCase().includes(filtro)||c.ref.toLowerCase().includes(filtro)));
+      return enRaiz||enHijos;
+    });
+  }
+  const html=roots.map(p=>renderSidebarProj(p,0)).join('');
+  const fallback=`<div style="padding:8px 16px;font-size:12px;color:var(--muted);">${filtro?'Sin resultados':'Sin proyectos'}</div>`;
   const list=document.getElementById('sidebar-proj-list');
   if(list) list.innerHTML=html||fallback;
   const listW=document.getElementById('sidebar-proj-list-worker');
   if(listW) listW.innerHTML=html||fallback;
 }
 function renderSidebarProj(p,d){
-  const children=S.proyectos.filter(x=>x.parentId===p.id);
+  let children=S.proyectos.filter(x=>x.parentId===p.id);
+  children=children.map(c=>({c,h:_horasProyectoTotal(c)})).sort((a,b)=>b.h-a.h).map(x=>x.c);
   const isAct=currentPage==='proyecto'&&currentProjId===p.id;
+  const horasP=_horasProyectoTotal(p);
   let h=`<div class="proj-item ${isAct?'active':''}" style="padding-left:${16+d*10}px" onclick="showPage('proyecto','${p.id}')">
     <div class="proj-dot" style="background:${p.color||'#7a7874'};"></div>
-    <div><div class="proj-name">${esc(p.nombre)}</div><div class="proj-ref">${esc(p.ref)}</div></div>
+    <div style="flex:1;"><div class="proj-name">${esc(p.nombre)}</div><div class="proj-ref">${esc(p.ref)}</div></div>
+    ${horasP?`<div style="font-size:10px;color:var(--muted);white-space:nowrap;">${hFmt(horasP)}</div>`:''}
   </div>`;
   if(children.length)h+=children.map(c=>renderSidebarProj(c,d+1)).join('');
   return h;
@@ -2604,6 +2653,7 @@ function renderCalDayDetail(){
 // ═══ WORKER: MODAL HORAS ═══
 function abrirModalHoras(registroId){
   cH={proyId:null,deptId:null,tareaId:null,step:0,editId:registroId||null};
+  hProyFiltro='';
   if(registroId){
     const r=S.registros.find(x=>x.id===registroId);
     if(r){cH.proyId=r.proyId;const ta=getTarea(r.tareaId);if(ta){cH.deptId=ta.deptId;cH.tareaId=r.tareaId;}cH.step=3;}
@@ -2630,7 +2680,10 @@ function buildCascadeH(){
     <div class="cascade-step-num ${cH.proyId?'done':cH.step===0?'active':''}">${cH.proyId?'✓':'1'}</div>
     <div class="cascade-step-label">Proyecto</div>
     ${proySel?`<div class="cascade-step-value">${esc(proySel.nombre)}</div>`:''}
-  </div><div class="cascade-step-body ${cH.step===0?'open':''}"><div class="cascade-options">${buildProyOptsH()}</div></div></div>`;
+  </div><div class="cascade-step-body ${cH.step===0?'open':''}">
+    <input type="text" placeholder="Buscar nº, nombre o cliente..." value="${esc(hProyFiltro)}" oninput="hFiltrarProy(this.value)" style="width:100%;margin-bottom:8px;padding:7px 10px;font-size:12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+    <div class="cascade-options">${buildProyOptsH()}</div>
+  </div></div>`;
   if(cH.proyId){
     if(hayDepts){
       html+=`<div class="cascade-step"><div class="cascade-step-header" onclick="hToggleCS(1)">
@@ -2652,14 +2705,29 @@ function buildCascadeH(){
   document.getElementById('btn-save-horas').style.display=show?'':'none';
   if(show&&!cH.editId)setTimeout(()=>document.getElementById('mhoras-horas').focus(),50);
 }
+let hProyFiltro='';
+function hFiltrarProy(valor){
+  hProyFiltro=(valor||'').toLowerCase().trim();
+  buildCascadeH();
+}
 function buildProyOptsH(){
+  if(hProyFiltro){
+    const matches=S.proyectos.filter(p=>p.nombre.toLowerCase().includes(hProyFiltro)||p.ref.toLowerCase().includes(hProyFiltro)||(p.cliente||'').toLowerCase().includes(hProyFiltro));
+    if(!matches.length)return`<div class="text-sm text-muted" style="padding:8px;">Sin resultados</div>`;
+    return buildProyRecH(matches,'');
+  }
   const roots=S.proyectos.filter(p=>!p.parentId);
   if(!roots.length)return`<div class="text-sm text-muted" style="padding:8px;">Sin proyectos</div>`;
   return buildProyRecH(roots,'');
 }
 function buildProyRecH(projs,indent){
-  return projs.map(p=>{
-    const children=S.proyectos.filter(x=>x.parentId===p.id);
+  const sorted=[...projs].sort((a,b)=>{
+    const hA=_horasProyectoTotal(a),hB=_horasProyectoTotal(b);
+    if(hB!==hA)return hB-hA;
+    return (b.creado||'').localeCompare(a.creado||'');
+  });
+  return sorted.map(p=>{
+    const children=hProyFiltro?[]:S.proyectos.filter(x=>x.parentId===p.id);
     let h=`<div class="cascade-opt ${cH.proyId===p.id?'selected':''}" onclick="hSelProy('${p.id}')">
       <span style="width:10px;height:10px;border-radius:50%;background:${p.color||'#7a7874'};display:inline-block;flex-shrink:0;"></span>
       <span style="flex:1;">${indent}${esc(p.nombre)}</span><span class="text-sm text-muted mono">${esc(p.ref)}</span>
@@ -2718,6 +2786,7 @@ function deleteHoras(){
   if(!confirm('¿Eliminar?'))return;
   const id=cH.editId;
   const trabId=session.workerId;
+  _addTumba('registros',id);
   S.registros=S.registros.filter(x=>x.id!==id);
   save();closeModal('modal-horas');renderPage(currentPage);
   deleteRegistroServidor(trabId,id);
@@ -2783,6 +2852,7 @@ function loadTicketPreview(base64,prefix){
 function abrirModalGasto(gastoId){
   cG={proyId:null,tareaId:null,step:0,tipo:null,editId:gastoId||null};
   _ticketBase64=null;
+  gProyFiltro='';gDeptAbierto=null;
   if(gastoId){
     const g=S.gastos.find(x=>x.id===gastoId);
     if(g){cG.proyId=g.proyId;cG.tareaId=g.tareaId;cG.tipo=g.tipo;cG.step=3;}
@@ -2810,11 +2880,17 @@ function buildCascadeG(){
   const tareaSel=cG.tareaId?getTarea(cG.tareaId):null;
   let html='';
   // Paso 1: Proyecto
+  const proyFiltrados=gProyFiltro
+    ?S.proyectos.filter(p=>p.nombre.toLowerCase().includes(gProyFiltro)||p.ref.toLowerCase().includes(gProyFiltro)||(p.cliente||'').toLowerCase().includes(gProyFiltro))
+    :S.proyectos.filter(p=>!p.parentId);
   html+=`<div class="cascade-step"><div class="cascade-step-header" onclick="gToggleCS(0)">
     <div class="cascade-step-num ${cG.proyId?'done-g':cG.step===0?'active':''}">${cG.proyId?'✓':'1'}</div>
     <div class="cascade-step-label">Proyecto</div>
     ${proySel?`<div class="cascade-step-value">${esc(proySel.nombre)}</div>`:''}
-  </div><div class="cascade-step-body ${cG.step===0?'open':''}"><div class="cascade-options">${buildProyRecG(S.proyectos.filter(p=>!p.parentId),'')}</div></div></div>`;
+  </div><div class="cascade-step-body ${cG.step===0?'open':''}">
+    <input type="text" placeholder="Buscar nº, nombre o cliente..." value="${esc(gProyFiltro)}" oninput="gFiltrarProy(this.value)" style="width:100%;margin-bottom:8px;padding:7px 10px;font-size:12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+    <div class="cascade-options">${buildProyRecG(proyFiltrados,gProyFiltro?'':'')}</div>
+  </div></div>`;
   if(cG.proyId){
     // Paso 2: Tarea (agrupada por dept)
     html+=`<div class="cascade-step"><div class="cascade-step-header" onclick="gToggleCS(1)">
@@ -2829,8 +2905,15 @@ function buildCascadeG(){
   document.getElementById('btn-save-gasto').style.display=show?'':'none';
   if(show)renderTipoGrid('mgasto-tipo-grid',cG.tipo);
 }
+let gProyFiltro='';
 function buildProyRecG(projs,indent){
-  return projs.map(p=>{
+  // Ordenar por horas invertidas (desc), luego por fecha de creación (reciente primero)
+  const sorted=[...projs].sort((a,b)=>{
+    const hA=_horasProyectoTotal(a),hB=_horasProyectoTotal(b);
+    if(hB!==hA)return hB-hA;
+    return (b.creado||'').localeCompare(a.creado||'');
+  });
+  return sorted.map(p=>{
     const children=S.proyectos.filter(x=>x.parentId===p.id);
     let h=`<div class="cascade-opt ${cG.proyId===p.id?'selected':''}" onclick="gSelProy('${p.id}')">
       <span style="width:10px;height:10px;border-radius:50%;background:${p.color||'#7a7874'};display:inline-block;flex-shrink:0;"></span>
@@ -2840,18 +2923,40 @@ function buildProyRecG(projs,indent){
     return h;
   }).join('');
 }
+function gFiltrarProy(valor){
+  gProyFiltro=(valor||'').toLowerCase().trim();
+  buildCascadeG();
+}
+let gDeptAbierto=null;
 function buildTareaOptsG(){
   if(!S.tareas.length)return`<div class="text-sm text-muted" style="padding:8px;">Sin tareas</div>`;
   const groups={};S.tareas.forEach(ta=>{const k=ta.deptId||'__none__';if(!groups[k])groups[k]=[];groups[k].push(ta);});
   const ordK=[...Object.keys(groups).filter(k=>k!=='__none__'),'__none__'];
+  // Si la tarea ya seleccionada tiene departamento, abrirlo por defecto
+  if(gDeptAbierto===null&&cG.tareaId){
+    const taSel=getTarea(cG.tareaId);
+    if(taSel)gDeptAbierto=taSel.deptId||'__none__';
+  }
   let html='';
   ordK.forEach(k=>{
     if(!groups[k])return;
     const d=k==='__none__'?null:getDept(k);
-    if(d)html+=`<div style="font-size:10px;font-weight:600;color:${d.color};text-transform:uppercase;letter-spacing:0.5px;padding:8px 0 3px;display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;border-radius:50%;background:${d.color};display:inline-block;"></span>${esc(d.nombre)}</div>`;
-    html+=groups[k].map(ta=>`<div class="cascade-opt ${cG.tareaId===ta.id?'selected':''}" onclick="gSelTarea('${ta.id}')"><span style="flex:1;">${esc(ta.nombre)}</span></div>`).join('');
+    const abierto=gDeptAbierto===k;
+    html+=`<div class="cascade-opt" style="font-weight:600;cursor:pointer;" onclick="gToggleDept('${k}')">
+      ${d?`<span style="width:9px;height:9px;border-radius:50%;background:${d.color};display:inline-block;flex-shrink:0;"></span>`:''}
+      <span style="flex:1;font-size:12px;text-transform:uppercase;letter-spacing:0.3px;color:${d?d.color:'var(--muted)'};">${d?esc(d.nombre):'Sin departamento'}</span>
+      <span style="font-size:11px;color:var(--muted);">${groups[k].length}</span>
+      <span style="font-size:11px;color:var(--muted);transform:rotate(${abierto?90:0}deg);transition:transform .15s;display:inline-block;">›</span>
+    </div>`;
+    if(abierto){
+      html+=`<div style="padding-left:14px;">${groups[k].map(ta=>`<div class="cascade-opt ${cG.tareaId===ta.id?'selected':''}" onclick="event.stopPropagation();gSelTarea('${ta.id}')"><span style="flex:1;">${esc(ta.nombre)}</span></div>`).join('')}</div>`;
+    }
   });
   return html;
+}
+function gToggleDept(k){
+  gDeptAbierto=gDeptAbierto===k?null:k;
+  buildCascadeG();
 }
 function renderTipoGrid(containerId,selected){
   const el=document.getElementById(containerId);if(!el)return;
@@ -2864,7 +2969,7 @@ function selectTipo(containerId,tid){
   else admGastoTipo=tid;
   renderTipoGrid(containerId,tid);
 }
-function gSelProy(id){cG.proyId=id;cG.tareaId=null;cG.step=1;buildCascadeG();}
+function gSelProy(id){cG.proyId=id;cG.tareaId=null;cG.step=1;gDeptAbierto=null;buildCascadeG();}
 function gSelTarea(id){cG.tareaId=id;cG.step=2;buildCascadeG();}
 function gToggleCS(step){cG.step=step;buildCascadeG();}
 function guardarGasto(){
@@ -2891,6 +2996,7 @@ function deleteGasto(){
   if(!confirm('¿Eliminar?'))return;
   const id=cG.editId;
   const trabId=session.workerId;
+  _addTumba('gastos',id);
   S.gastos=S.gastos.filter(x=>x.id!==id);
   save();closeModal('modal-gasto');renderPage(currentPage);
   deleteGastoServidor(trabId,id);
@@ -2924,7 +3030,7 @@ function saveRegistro(){
   save();closeModal('modal-registro');renderPage(currentPage);
   syncRegistro(r);
 }
-function deleteRegistro(){if(!confirm('¿Eliminar?'))return;const id=editRegId;S.registros=S.registros.filter(x=>x.id!==id);save();closeModal('modal-registro');renderPage(currentPage);spEliminar('registros',id);}
+function deleteRegistro(){if(!confirm('¿Eliminar?'))return;const id=editRegId;_addTumba('registros',id);S.registros=S.registros.filter(x=>x.id!==id);save();closeModal('modal-registro');renderPage(currentPage);spEliminar('registros',id);}
 
 // ═══ ADMIN: EDITAR GASTO ═══
 function openEditGastoAdmin(id){
@@ -2957,7 +3063,7 @@ function saveGastoAdmin(){
   save();closeModal('modal-gasto-admin');renderPage(currentPage);
   syncGasto(g);
 }
-function deleteGastoAdmin(){if(!confirm('¿Eliminar?'))return;const id=editGastoAdminId;S.gastos=S.gastos.filter(x=>x.id!==id);save();closeModal('modal-gasto-admin');renderPage(currentPage);spEliminar('gastos',id);}
+function deleteGastoAdmin(){if(!confirm('¿Eliminar?'))return;const id=editGastoAdminId;_addTumba('gastos',id);S.gastos=S.gastos.filter(x=>x.id!==id);save();closeModal('modal-gasto-admin');renderPage(currentPage);spEliminar('gastos',id);}
 
 // ═══ MODALES CRUD ═══
 function openModalProyecto(id,forceParent){
@@ -2986,15 +3092,18 @@ async function saveProyecto(){
 async function deleteProyecto(){
   if(!confirm('¿Eliminar proyecto y sus datos?'))return;
   const id=editingProjId;
+  const subIds=S.proyectos.filter(x=>x.parentId===id).map(x=>x.id);
+  _addTumba('proyectos',id); subIds.forEach(sid=>_addTumba('proyectos',sid));
   S.proyectos=S.proyectos.filter(x=>x.id!==id&&x.parentId!==id);
   S.registros=S.registros.filter(r=>r.proyId!==id);
   S.gastos=S.gastos.filter(g=>g.proyId!==id);
   save();closeModal('modal-proyecto');showPage('dashboard');
   try{
     await spEliminar('proyectos',id);
+    for(const sid of subIds) await spEliminar('proyectos',sid);
     showSyncStatus('✓ Proyecto eliminado',true);
   }catch(e){
-    showSyncStatus('⚠ Eliminado en local, error al sincronizar con SharePoint',false);
+    showSyncStatus('⚠ Eliminado en local — no volverá a aparecer',false);
   }
 }
 function openModalDept(id){
@@ -3015,10 +3124,13 @@ function saveDept(){
 }
 function deleteDept(){
   if(!confirm('¿Eliminar departamento?'))return;
-  S.tareas.forEach(ta=>{if(ta.deptId===editingDeptId)ta.deptId=null;});
-  S.departamentos=S.departamentos.filter(x=>x.id!==editingDeptId);
-  if(filterDeptId===editingDeptId)filterDeptId=null;
+  const id=editingDeptId;
+  _addTumba('departamentos',id);
+  S.tareas.forEach(ta=>{if(ta.deptId===id)ta.deptId=null;});
+  S.departamentos=S.departamentos.filter(x=>x.id!==id);
+  if(filterDeptId===id)filterDeptId=null;
   save();closeModal('modal-dept');renderPage(currentPage);
+  spEliminar('departamentos',id);
   syncConfig();
 }
 function openModalTarea(id, preDeptId){
@@ -3041,6 +3153,7 @@ function saveTarea(){
 function deleteTarea(){
   if(!confirm('¿Eliminar tarea?'))return;
   const id=editingTareaId;
+  _addTumba('tareas',id);
   S.tareas=S.tareas.filter(x=>x.id!==id);
   save();closeModal('modal-tarea');renderPage(currentPage);
   spEliminar('tareas',id);
@@ -3069,6 +3182,7 @@ function saveTrabajador(){
 function deleteTrabajador(){
   if(!confirm('¿Eliminar?'))return;
   const id=editingTrabId;
+  _addTumba('trabajadores',id);
   S.trabajadores=S.trabajadores.filter(x=>x.id!==id);
   save();closeModal('modal-trabajador');renderPage(currentPage);
   spEliminar('trabajadores',id);
