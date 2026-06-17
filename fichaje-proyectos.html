@@ -1091,6 +1091,7 @@ async function cargarSpIds(list){
 async function spGuardar(list, obj){
   const key = list + '_' + obj.id;
   const body = JSON.stringify({Title: obj.id, SPData: JSON.stringify(obj)});
+  if(typeof _spSaveEnCurso!=='undefined') _spSaveEnCurso++;
   try{
     if(_spIds[key]){
       await spFetch(spUrl(list)+`(${_spIds[key]})`, {method:'PATCH', headers:{'If-Match':'*'}, body});
@@ -1099,16 +1100,22 @@ async function spGuardar(list, obj){
       if(res) _spIds[key] = res.Id;
     }
   }catch(e){ console.warn('spGuardar error:', list, e.message); }
+  finally{ if(typeof _spSaveEnCurso!=='undefined') _spSaveEnCurso=Math.max(0,_spSaveEnCurso-1); }
 }
 
 // Eliminar item de lista SP
 async function spEliminar(list, objId){
   const key = list + '_' + objId;
-  if(!_spIds[key]) return;
-  try{
-    await spFetch(spUrl(list)+`(${_spIds[key]})`, {method:'DELETE', headers:{'If-Match':'*'}});
-    delete _spIds[key];
-  }catch(e){ console.warn('spEliminar error:', list, e.message); }
+  if(!_spIds[key]){
+    // Intentar recargar IDs de SP por si no estaban cacheados
+    await cargarSpIds(list);
+  }
+  if(!_spIds[key]){
+    console.warn('spEliminar: no se encontró el item en SharePoint', list, objId);
+    return;
+  }
+  await spFetch(spUrl(list)+`(${_spIds[key]})`, {method:'DELETE', headers:{'If-Match':'*'}});
+  delete _spIds[key];
 }
 
 // Cargar todos los datos desde SharePoint
@@ -1297,8 +1304,9 @@ async function completarLoginMSAL(){
 }
 
 // Refresco automático SP cada 60s
+let _spSaveEnCurso = 0; // contador de operaciones de guardado en curso
 setInterval(async()=>{
-  if(msalToken && session.role){
+  if(msalToken && session.role && _spSaveEnCurso===0){
     try{
       await cargarDesdeSP();
       if(currentPage) renderPage(currentPage);
@@ -2965,7 +2973,7 @@ function openModalProyecto(id,forceParent){
 }
 function pickColor(c,el,cId){selectedColor=c;document.querySelectorAll('#'+cId+' .color-opt').forEach(e=>e.classList.remove('selected'));el.classList.add('selected');}
 function pickDeptColor(c,el){selectedDeptColor=c;document.querySelectorAll('#mdept-colors .color-opt').forEach(e=>e.classList.remove('selected'));el.classList.add('selected');}
-function saveProyecto(){
+async function saveProyecto(){
   const nombre=document.getElementById('mproy-nombre').value.trim(),ref=document.getElementById('mproy-ref').value.trim();
   if(!nombre||!ref)return alert('Nombre y referencia obligatorios.');
   const parentId=document.getElementById('mproy-parent').value||null;
@@ -2973,16 +2981,21 @@ function saveProyecto(){
   if(editingProjId){p=S.proyectos.find(x=>x.id===editingProjId);Object.assign(p,{nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId});}
   else{p={id:uid(),nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId,creado:new Date().toISOString()};S.proyectos.push(p);}
   save();closeModal('modal-proyecto');renderPage(currentPage);renderSidebar();
-  if(p)spGuardar('proyectos',p);
+  if(p) await spGuardar('proyectos',p);
 }
-function deleteProyecto(){
+async function deleteProyecto(){
   if(!confirm('¿Eliminar proyecto y sus datos?'))return;
   const id=editingProjId;
   S.proyectos=S.proyectos.filter(x=>x.id!==id&&x.parentId!==id);
   S.registros=S.registros.filter(r=>r.proyId!==id);
   S.gastos=S.gastos.filter(g=>g.proyId!==id);
   save();closeModal('modal-proyecto');showPage('dashboard');
-  spEliminar('proyectos',id);
+  try{
+    await spEliminar('proyectos',id);
+    showSyncStatus('✓ Proyecto eliminado',true);
+  }catch(e){
+    showSyncStatus('⚠ Eliminado en local, error al sincronizar con SharePoint',false);
+  }
 }
 function openModalDept(id){
   editingDeptId=id||null;const d=id?getDept(id):null;
