@@ -2914,6 +2914,7 @@ function saveRegistro(){
   r.horas=parseFloat(document.getElementById('mreg-horas').value)||0;
   r.notas=document.getElementById('mreg-notas').value.trim();
   save();closeModal('modal-registro');renderPage(currentPage);
+  syncRegistro(r);
 }
 function deleteRegistro(){if(!confirm('¿Eliminar?'))return;const id=editRegId;S.registros=S.registros.filter(x=>x.id!==id);save();closeModal('modal-registro');renderPage(currentPage);spEliminar('registros',id);}
 
@@ -2946,6 +2947,7 @@ function saveGastoAdmin(){
   g.formaPago=document.getElementById('mgadm-formapago').value;
   if(_ticketAdminBase64!==null)g.ticket=_ticketAdminBase64;
   save();closeModal('modal-gasto-admin');renderPage(currentPage);
+  syncGasto(g);
 }
 function deleteGastoAdmin(){if(!confirm('¿Eliminar?'))return;const id=editGastoAdminId;S.gastos=S.gastos.filter(x=>x.id!==id);save();closeModal('modal-gasto-admin');renderPage(currentPage);spEliminar('gastos',id);}
 
