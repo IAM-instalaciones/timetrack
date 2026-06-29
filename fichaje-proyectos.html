@@ -1117,10 +1117,15 @@ async function spEliminar(list, objId){
     await cargarSpIds(list);
   }
   if(!_spIds[key]){
-    console.warn('spEliminar: no se encontró el item en SharePoint', list, objId);
+    console.warn('spEliminar: no se encontró el item en SharePoint (ya no existe)', list, objId);
     return;
   }
-  await spFetch(spUrl(list)+`(${_spIds[key]})`, {method:'DELETE', headers:{'If-Match':'*'}});
+  try{
+    await spFetch(spUrl(list)+`(${_spIds[key]})`, {method:'DELETE', headers:{'If-Match':'*'}});
+  }catch(e){
+    // Si el error es 404, el item ya no existe en SP — no es un fallo real
+    if(!String(e.message).includes('404')) throw e;
+  }
   delete _spIds[key];
 }
 
@@ -1195,7 +1200,23 @@ async function subirTodoASP(){
 }
 
 // Login con Microsoft 365 — usando redirect (compatible con SharePoint)
+function _limpiarEstadoMSAL(){
+  // Limpiar cualquier estado de interacción atascado de MSAL
+  // (común si un intento anterior de login se interrumpió: cambio de pestaña,
+  // cierre del popup en móvil, recarga de página a mitad de proceso, etc.)
+  try{
+    [localStorage, sessionStorage].forEach(store=>{
+      Object.keys(store).forEach(k=>{
+        if(k.toLowerCase().includes('interaction.status')||k.toLowerCase().includes('msal.interaction')){
+          store.removeItem(k);
+        }
+      });
+    });
+  }catch(e){}
+}
+
 async function loginMicrosoft(){
+  _limpiarEstadoMSAL();
   // Init MSAL if not done yet
   if(!msalInstance){
     await initMSAL();
@@ -1205,7 +1226,19 @@ async function loginMicrosoft(){
   if(errEl) errEl.textContent = '';
   try{
     showSyncStatus('⟳ Conectando con Microsoft...', true);
-    const response = await msalInstance.loginPopup({scopes: SP_SCOPES, prompt:'select_account'});
+    let response;
+    try{
+      response = await msalInstance.loginPopup({scopes: SP_SCOPES, prompt:'select_account'});
+    }catch(innerErr){
+      // Si el error es por interacción en curso, limpiar y reintentar una vez
+      if(String(innerErr.errorCode||innerErr.message||'').includes('interaction_in_progress')){
+        _limpiarEstadoMSAL();
+        await new Promise(r=>setTimeout(r,300));
+        response = await msalInstance.loginPopup({scopes: SP_SCOPES, prompt:'select_account'});
+      }else{
+        throw innerErr;
+      }
+    }
     if(response){
       msalAccount = response.account;
       msalToken = response.accessToken;
