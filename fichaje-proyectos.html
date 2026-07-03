@@ -1021,6 +1021,7 @@ let msalToken = null;
 let msalAccount = null;
 let msalInstance = null;
 let _spIds = {}; // cache de IDs internos de SP
+let _spSaveEnCurso = 0; // bloquea el refresco mientras hay guardados en curso
 
 // Inicializar MSAL
 async function initMSAL(){
@@ -1362,7 +1363,7 @@ async function completarLoginMSAL(){
 }
 
 // Refresco automático SP cada 60s
-let _spSaveEnCurso = 0; // contador de operaciones de guardado en curso
+// _spSaveEnCurso is declared near SP_CONFIG above
 setInterval(async()=>{
   if(msalToken && session.role && _spSaveEnCurso===0){
     try{
@@ -1371,7 +1372,7 @@ setInterval(async()=>{
       renderSidebar();
     }catch(e){}
   }
-}, 60000);
+}, 300000); // Refresco cada 5 minutos
 
 
 
@@ -3117,10 +3118,15 @@ async function saveProyecto(){
   if(!nombre||!ref)return alert('Nombre y referencia obligatorios.');
   const parentId=document.getElementById('mproy-parent').value||null;
   let p;
-  if(editingProjId){p=S.proyectos.find(x=>x.id===editingProjId);Object.assign(p,{nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId});}
-  else{p={id:uid(),nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId,creado:new Date().toISOString()};S.proyectos.push(p);}
-  save();closeModal('modal-proyecto');renderPage(currentPage);renderSidebar();
-  if(p) await spGuardar('proyectos',p);
+  _spSaveEnCurso++; // bloquear refresco mientras guardamos
+  try{
+    if(editingProjId){p=S.proyectos.find(x=>x.id===editingProjId);Object.assign(p,{nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId});}
+    else{p={id:uid(),nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId,creado:new Date().toISOString()};S.proyectos.push(p);}
+    save();closeModal('modal-proyecto');renderPage(currentPage);renderSidebar();
+    if(p) await spGuardar('proyectos',p);
+  }finally{
+    _spSaveEnCurso=Math.max(0,_spSaveEnCurso-1);
+  }
 }
 async function deleteProyecto(){
   if(!confirm('¿Eliminar proyecto y sus datos?'))return;
