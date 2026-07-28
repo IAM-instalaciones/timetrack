@@ -1151,6 +1151,10 @@ function _filtrarTumbas(list,arr){
 }
 
 async function cargarDesdeSP(){
+  if(_spSaveEnCurso>0){
+    console.log('cargarDesdeSP omitido — hay guardados en curso');
+    return true;
+  }
   showSyncStatus('⟳ Cargando datos de SharePoint...', true);
   try{
     const [proy,depts,tareas,regs,gastos,trabs,cfgs] = await Promise.all([
@@ -1162,14 +1166,21 @@ async function cargarDesdeSP(){
       spFetch(spUrl('trabajadores') + '?$top=100&$select=Title,SPData'),
       spFetch(spUrl('config')       + '?$top=10&$select=Title,SPData'),
     ]);
-    // Deduplicar por id al cargar de SP
     function dedup(arr){const seen=new Set();return arr.filter(x=>{if(!x||!x.id||seen.has(x.id))return false;seen.add(x.id);return true;});}
-    if(proy.value.length)    S.proyectos     = _filtrarTumbas('proyectos',    dedup(proy.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
-    if(depts.value.length)   S.departamentos = _filtrarTumbas('departamentos',dedup(depts.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
-    if(tareas.value.length)  S.tareas        = _filtrarTumbas('tareas',       dedup(tareas.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
-    if(regs.value.length)    S.registros     = _filtrarTumbas('registros',    dedup(regs.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
-    if(gastos.value.length)  S.gastos        = _filtrarTumbas('gastos',       dedup(gastos.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
-    if(trabs.value.length)   S.trabajadores  = _filtrarTumbas('trabajadores', dedup(trabs.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+    // Función de merge: combina datos locales con SP, priorizando SP pero sin perder items locales no sincronizados aún
+    function merge(local, fromSP, lista){
+      const spItems = _filtrarTumbas(lista, dedup(fromSP.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+      const spIds = new Set(spItems.map(x=>x.id));
+      // Items locales que SP aún no tiene (recién creados, pendientes de sincronizar)
+      const soloLocales = local.filter(x=>x&&x.id&&!spIds.has(x.id)&&!_getTumbas()[lista]?.includes(x.id));
+      return [...spItems, ...soloLocales];
+    }
+    if(proy.value.length)    S.proyectos     = merge(S.proyectos,     proy.value,  'proyectos');
+    if(depts.value.length)   S.departamentos = merge(S.departamentos, depts.value, 'departamentos');
+    if(tareas.value.length)  S.tareas        = merge(S.tareas,        tareas.value,'tareas');
+    if(regs.value.length)    S.registros     = merge(S.registros,     regs.value,  'registros');
+    if(gastos.value.length)  S.gastos        = merge(S.gastos,        gastos.value,'gastos');
+    if(trabs.value.length)   S.trabajadores  = merge(S.trabajadores,  trabs.value, 'trabajadores');
     const pinCfg = cfgs.value.find(i=>i.Title==='pin');
     if(pinCfg) S.pin = JSON.parse(pinCfg.SPData).value;
     save();
