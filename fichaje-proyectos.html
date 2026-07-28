@@ -1089,7 +1089,7 @@ function spUrl(list){ return `${SP_CONFIG.siteUrl}/_api/web/lists/getbytitle('${
 // Cargar IDs internos de SP para poder hacer updates
 async function cargarSpIds(list){
   try{
-    const res = await spFetch(spUrl(list) + '?$top=5000&$select=Id,Title');
+    const res = await spFetch(spUrl(list) + '?$top=10000&$select=Id,Title');
     res.value.forEach(i => { _spIds[list+'_'+i.Title] = i.Id; });
   }catch(e){ console.warn('cargarSpIds error:', list, e.message); }
 }
@@ -1158,12 +1158,12 @@ async function cargarDesdeSP(){
   showSyncStatus('⟳ Cargando datos de SharePoint...', true);
   try{
     const [proy,depts,tareas,regs,gastos,trabs,cfgs] = await Promise.all([
-      spFetch(spUrl('proyectos')    + '?$top=500&$select=Title,SPData'),
-      spFetch(spUrl('departamentos')+ '?$top=100&$select=Title,SPData'),
-      spFetch(spUrl('tareas')       + '?$top=500&$select=Title,SPData'),
-      spFetch(spUrl('registros')    + '?$top=5000&$select=Title,SPData'),
-      spFetch(spUrl('gastos')       + '?$top=5000&$select=Title,SPData'),
-      spFetch(spUrl('trabajadores') + '?$top=100&$select=Title,SPData'),
+      spFetch(spUrl('proyectos')    + '?$top=2000&$select=Title,SPData'),
+      spFetch(spUrl('departamentos')+ '?$top=500&$select=Title,SPData'),
+      spFetch(spUrl('tareas')       + '?$top=2000&$select=Title,SPData'),
+      spFetch(spUrl('registros')    + '?$top=10000&$select=Title,SPData'),
+      spFetch(spUrl('gastos')       + '?$top=10000&$select=Title,SPData'),
+      spFetch(spUrl('trabajadores') + '?$top=500&$select=Title,SPData'),
       spFetch(spUrl('config')       + '?$top=10&$select=Title,SPData'),
     ]);
     function dedup(arr){const seen=new Set();return arr.filter(x=>{if(!x||!x.id||seen.has(x.id))return false;seen.add(x.id);return true;});}
