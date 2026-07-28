@@ -1167,20 +1167,23 @@ async function cargarDesdeSP(){
       spFetch(spUrl('config')       + '?$top=10&$select=Title,SPData'),
     ]);
     function dedup(arr){const seen=new Set();return arr.filter(x=>{if(!x||!x.id||seen.has(x.id))return false;seen.add(x.id);return true;});}
-    // Función de merge: combina datos locales con SP, priorizando SP pero sin perder items locales no sincronizados aún
-    function merge(local, fromSP, lista){
-      const spItems = _filtrarTumbas(lista, dedup(fromSP.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+    // Para configuración (proyectos, depts, tareas, trabajadores): SP siempre manda
+    // Para datos personales (registros, gastos): merge para no perder items pendientes
+    function fromSP(fromSPArr, lista){
+      return _filtrarTumbas(lista, dedup(fromSPArr.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
+    }
+    function mergePersonal(local, fromSPArr, lista){
+      const spItems = fromSP(fromSPArr, lista);
       const spIds = new Set(spItems.map(x=>x.id));
-      // Items locales que SP aún no tiene (recién creados, pendientes de sincronizar)
-      const soloLocales = local.filter(x=>x&&x.id&&!spIds.has(x.id)&&!_getTumbas()[lista]?.includes(x.id));
+      const soloLocales = local.filter(x=>x&&x.id&&!spIds.has(x.id)&&!(_getTumbas()[lista]||[]).includes(x.id));
       return [...spItems, ...soloLocales];
     }
-    if(proy.value.length)    S.proyectos     = merge(S.proyectos,     proy.value,  'proyectos');
-    if(depts.value.length)   S.departamentos = merge(S.departamentos, depts.value, 'departamentos');
-    if(tareas.value.length)  S.tareas        = merge(S.tareas,        tareas.value,'tareas');
-    if(regs.value.length)    S.registros     = merge(S.registros,     regs.value,  'registros');
-    if(gastos.value.length)  S.gastos        = merge(S.gastos,        gastos.value,'gastos');
-    if(trabs.value.length)   S.trabajadores  = merge(S.trabajadores,  trabs.value, 'trabajadores');
+    if(proy.value.length)    S.proyectos     = fromSP(proy.value,  'proyectos');
+    if(depts.value.length)   S.departamentos = fromSP(depts.value, 'departamentos');
+    if(tareas.value.length)  S.tareas        = fromSP(tareas.value,'tareas');
+    if(trabs.value.length)   S.trabajadores  = fromSP(trabs.value, 'trabajadores');
+    if(regs.value.length)    S.registros     = mergePersonal(S.registros, regs.value,  'registros');
+    if(gastos.value.length)  S.gastos        = mergePersonal(S.gastos,    gastos.value,'gastos');
     const pinCfg = cfgs.value.find(i=>i.Title==='pin');
     if(pinCfg) S.pin = JSON.parse(pinCfg.SPData).value;
     save();
@@ -3129,7 +3132,7 @@ async function saveProyecto(){
   if(!nombre||!ref)return alert('Nombre y referencia obligatorios.');
   const parentId=document.getElementById('mproy-parent').value||null;
   let p;
-  _spSaveEnCurso++; // bloquear refresco mientras guardamos
+  _spSaveEnCurso++;
   try{
     if(editingProjId){p=S.proyectos.find(x=>x.id===editingProjId);Object.assign(p,{nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId});}
     else{p={id:uid(),nombre,ref,cliente:document.getElementById('mproy-cliente').value.trim(),desc:document.getElementById('mproy-desc').value.trim(),color:selectedColor,parentId,creado:new Date().toISOString()};S.proyectos.push(p);}
@@ -3137,6 +3140,8 @@ async function saveProyecto(){
     if(p) await spGuardar('proyectos',p);
   }finally{
     _spSaveEnCurso=Math.max(0,_spSaveEnCurso-1);
+    // Recargar desde SP para confirmar que se guardó y actualizar otros dispositivos
+    if(msalToken) setTimeout(()=>cargarDesdeSP().then(()=>{renderPage(currentPage);renderSidebar();}), 2000);
   }
 }
 async function deleteProyecto(){
