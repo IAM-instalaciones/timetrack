@@ -1167,23 +1167,20 @@ async function cargarDesdeSP(){
       spFetch(spUrl('config')       + '?$top=10&$select=Title,SPData'),
     ]);
     function dedup(arr){const seen=new Set();return arr.filter(x=>{if(!x||!x.id||seen.has(x.id))return false;seen.add(x.id);return true;});}
-    // Para configuración (proyectos, depts, tareas, trabajadores): SP siempre manda
-    // Para datos personales (registros, gastos): merge para no perder items pendientes
-    function fromSP(fromSPArr, lista){
-      return _filtrarTumbas(lista, dedup(fromSPArr.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
-    }
-    function mergePersonal(local, fromSPArr, lista){
-      const spItems = fromSP(fromSPArr, lista);
+    function mergeConSP(local, fromSPArr, lista){
+      const spItems = _filtrarTumbas(lista, dedup(fromSPArr.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}})));
       const spIds = new Set(spItems.map(x=>x.id));
-      const soloLocales = local.filter(x=>x&&x.id&&!spIds.has(x.id)&&!(_getTumbas()[lista]||[]).includes(x.id));
+      const tumbas = new Set(_getTumbas()[lista]||[]);
+      // Conservar items locales que SP aún no tiene Y no están en tumbas
+      const soloLocales = local.filter(x=>x&&x.id&&!spIds.has(x.id)&&!tumbas.has(x.id));
       return [...spItems, ...soloLocales];
     }
-    if(proy.value.length)    S.proyectos     = fromSP(proy.value,  'proyectos');
-    if(depts.value.length)   S.departamentos = fromSP(depts.value, 'departamentos');
-    if(tareas.value.length)  S.tareas        = fromSP(tareas.value,'tareas');
-    if(trabs.value.length)   S.trabajadores  = fromSP(trabs.value, 'trabajadores');
-    if(regs.value.length)    S.registros     = mergePersonal(S.registros, regs.value,  'registros');
-    if(gastos.value.length)  S.gastos        = mergePersonal(S.gastos,    gastos.value,'gastos');
+    if(proy.value.length)    S.proyectos     = mergeConSP(S.proyectos,     proy.value,  'proyectos');
+    if(depts.value.length)   S.departamentos = mergeConSP(S.departamentos, depts.value, 'departamentos');
+    if(tareas.value.length)  S.tareas        = mergeConSP(S.tareas,        tareas.value,'tareas');
+    if(trabs.value.length)   S.trabajadores  = mergeConSP(S.trabajadores,  trabs.value, 'trabajadores');
+    if(regs.value.length)    S.registros     = mergeConSP(S.registros,     regs.value,  'registros');
+    if(gastos.value.length)  S.gastos        = mergeConSP(S.gastos,        gastos.value,'gastos');
     const pinCfg = cfgs.value.find(i=>i.Title==='pin');
     if(pinCfg) S.pin = JSON.parse(pinCfg.SPData).value;
     save();
