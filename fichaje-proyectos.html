@@ -481,9 +481,20 @@ select.form-input{cursor:pointer;}
       <div class="modal-title" id="mot-title">Nueva OT / Proyecto</div>
       <button class="modal-close" onclick="closeModal('modal-ot')">×</button>
     </div>
+    <div class="form-group" id="mot-tipo-group">
+      <label class="form-label">Tipo</label>
+      <select class="form-input" id="mot-tipo" onchange="_actualizarTipoOT()">
+        <option value="proyecto">Proyecto (de un Cliente)</option>
+        <option value="ot">OT (dentro de un Proyecto)</option>
+      </select>
+    </div>
+    <div class="form-group" id="mot-proyecto-padre-group" style="display:none;">
+      <label class="form-label">Proyecto</label>
+      <select class="form-input" id="mot-proyecto-padre"></select>
+    </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Referencia (PROY000)</label>
+        <label class="form-label" id="mot-ref-label">Referencia (PROY000)</label>
         <input type="text" class="form-input" id="mot-ref" placeholder="PROY000">
       </div>
       <div class="form-group">
@@ -492,10 +503,10 @@ select.form-input{cursor:pointer;}
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Nombre / Descripción</label>
+      <label class="form-label" id="mot-nombre-label">Nombre / Descripción</label>
       <input type="text" class="form-input" id="mot-nombre" placeholder="Nombre del proyecto u OT">
     </div>
-    <div class="form-group">
+    <div class="form-group" id="mot-cliente-group">
       <label class="form-label">Cliente</label>
       <input type="text" class="form-input" id="mot-cliente" placeholder="Nombre del cliente">
     </div>
@@ -598,9 +609,43 @@ let S = JSON.parse(localStorage.getItem('tt_v9')||'null') || DATOS_INICIALES;
 // Asegurar arrays existen
 if(!S.tiposTrabajo) S.tiposTrabajo = DATOS_INICIALES.tiposTrabajo || [];
 if(!S.proyectos) S.proyectos = [];
+if(!S.ots) S.ots = [];
 if(!S.trabajadores) S.trabajadores = [];
 if(!S.registros) S.registros = [];
 if(!S.gastos) S.gastos = [];
+
+// ════════════════════════════════════════════
+// JERARQUÍA CLIENTE → PROYECTO → OT
+// ════════════════════════════════════════════
+function _esOTsuelta(p){return p&&(p.num!==undefined||String(p.id||'').startsWith('ot_'));}
+
+function findOrCrearProyecto(ref,cliente,color){
+  ref=(ref||'').trim();cliente=(cliente||'').trim();
+  if(ref){
+    const existente=S.proyectos.find(p=>!_esOTsuelta(p)&&(p.ref||'').trim().toLowerCase()===ref.toLowerCase());
+    if(existente){if(cliente&&!existente.cliente)existente.cliente=cliente;return existente;}
+  }
+  const nuevo={id:ref?('p_'+ref.toLowerCase().replace(/[^a-z0-9]+/g,'_')):('p_'+uid()),nombre:ref||('Sin proyecto — '+(cliente||'Sin cliente')),ref:ref||'',cliente:cliente||'',color:color||'#5ab4f0',parentId:null,creado:new Date().toISOString()};
+  S.proyectos.push(nuevo);
+  return nuevo;
+}
+
+function attachOT(otRaw){
+  const proy=findOrCrearProyecto(otRaw.ref,otRaw.cliente,otRaw.color);
+  let ot=S.ots.find(x=>x.id===otRaw.id);
+  const datos={id:otRaw.id,proyectoId:proy.id,num:otRaw.num||'',descripcion:otRaw.descripcion||'',estado:otRaw.estado||'En proceso',fecha:otRaw.fecha||'',color:otRaw.color||proy.color,creado:otRaw.creado||new Date().toISOString()};
+  if(ot)Object.assign(ot,datos);else{ot=datos;S.ots.push(ot);}
+  return ot;
+}
+
+// Migración única: separa OTs que quedaron mezcladas dentro de S.proyectos
+if(!S._migradoOTs){
+  const sueltas=S.proyectos.filter(_esOTsuelta);
+  sueltas.forEach(o=>attachOT(o));
+  S.proyectos=S.proyectos.filter(p=>!_esOTsuelta(p));
+  S._migradoOTs=true;
+  save();
+}
 
 let session = {role:null, workerId:null};
 let currentPage = '';
@@ -792,14 +837,11 @@ async function cargarDesdeSP(mostrarMsg=true){
       const soloLocal=local.filter(x=>x&&x.id&&!spIds.has(x.id));
       return [...spItems,...soloLocal];
     }
-    if(proy.value.length)S.proyectos=parse(proy,'proyectos');
-    // Merge OTs from TT_OTs (creadas desde Manifiesto) con proyectos manuales
+    if(proy.value.length)S.proyectos=parse(proy,'proyectos').filter(p=>!_esOTsuelta(p));
+    // OTs de TT_OTs (creadas desde Manifiesto): se anidan bajo su Proyecto, nunca se mezclan en S.proyectos
     if(ots.value.length){
       const otsFromGestion=parse(ots,'ots');
-      const otsIds=new Set(otsFromGestion.map(x=>x.id));
-      // Keep manual projects that don't come from Manifiesto, merge OTs
-      const manuales=S.proyectos.filter(x=>!otsIds.has(x.id));
-      S.proyectos=[...otsFromGestion,...manuales];
+      otsFromGestion.forEach(o=>attachOT(o));
     }
     if(trabs.value.length)S.trabajadores=parse(trabs,'trabajadores');
     if(tipos.value.length)S.tiposTrabajo=parse(tipos,'tipos').map(x=>x.nombre||x);
@@ -831,7 +873,7 @@ async function importarOTsDesdeManifiesto(){
         const res=await spFetch(spUrl('ots'),{method:'POST',body});
         if(res)_spIds['ots_'+ot.id]=res.Id;
       }
-      if(!S.proyectos.find(p=>p.id===ot.id))S.proyectos.push(ot);
+      attachOT(ot);
       ok++;
     }catch(e){console.warn('Error OT',ot.num,e.message);err++;}
   }
@@ -845,6 +887,7 @@ async function subirTodoASP(){
   const tok=await getToken();if(!tok){showSync('⚠ Sin token',false);return;}
   await Promise.all(Object.keys(SP.lists).map(l=>_cargarSpIds(l)));
   for(const p of S.proyectos)await spGuardar('proyectos',p);
+  for(const o of S.ots)await spGuardar('ots',o);
   for(const t of S.trabajadores)await spGuardar('trabajadores',t);
   for(const n of S.tiposTrabajo)await spGuardar('tipos',{id:'tipo_'+n.replace(/[^a-z0-9]/gi,'_').toLowerCase(),nombre:n});
   for(const r of S.registros)await spGuardar('registros',r);
@@ -871,7 +914,30 @@ function hFmt(h){const hrs=Math.floor(h),min=Math.round((h-hrs)*60);return min?`
 function fmtDate(d){if(!d)return'';const[y,m,da]=d.split('-');return`${da}/${m}/${y}`;}
 function todayStr(){return new Date().toISOString().slice(0,10);}
 function fmtMoneda(n){return(+n||0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+'€';}
-function getOT(id){return S.proyectos.find(x=>x.id===id);}
+function getOT(id){
+  const o=S.ots.find(x=>x.id===id);
+  if(o){
+    const p=S.proyectos.find(x=>x.id===o.proyectoId);
+    return{...o,nombre:'OT '+(o.num||'')+(o.descripcion?': '+o.descripcion:''),ref:p?p.ref:'',cliente:p?p.cliente:'',color:o.color||(p&&p.color)||'#888'};
+  }
+  return S.proyectos.find(x=>x.id===id);
+}
+function otsDe(proyId){return S.ots.filter(o=>o.proyectoId===proyId);}
+
+// Lista de elementos seleccionables para fichar horas/gastos: OTs (agrupadas por su Proyecto)
+// + Proyectos sin OTs propias (para poder fichar directamente sobre el proyecto).
+function itemsSeleccionables(soloAbiertos){
+  const items=[];
+  [...S.proyectos].sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es')).forEach(p=>{
+    const hijas=otsDe(p.id).filter(o=>!soloAbiertos||(o.estado!=='Finalizado'&&o.estado!=='Cerrado'));
+    if(hijas.length){
+      hijas.forEach(o=>items.push({id:o.id,label:'OT '+o.num+(o.descripcion?' – '+o.descripcion:''),sub:(p.cliente?p.cliente+' · ':'')+(p.ref||p.nombre),color:o.color||p.color,_h:horasOT(o.id),estado:o.estado}));
+    }else if(!soloAbiertos||(p.estado!=='Finalizado'&&p.estado!=='Cerrado')){
+      items.push({id:p.id,label:(p.ref||'')+' '+(p.nombre||''),sub:p.cliente||'',color:p.color,_h:horasOT(p.id),estado:p.estado});
+    }
+  });
+  return items.sort((a,b)=>b._h-a._h);
+}
 function getTrab(id){return S.trabajadores.find(x=>x.id===id);}
 function horasOT(otId){return S.registros.filter(r=>r.proyId===otId).reduce((a,r)=>a+(+r.horas||0),0);}
 
@@ -1013,21 +1079,35 @@ function filtrarProyectos(v){_projFiltro=(v||'').toLowerCase().trim();renderProy
 
 function renderProyList(){
   const list=document.getElementById('proj-list');if(!list)return;
-  let projs=[...S.proyectos];
-  // Sort by hours (desc)
-  projs=projs.map(p=>{const h=horasOT(p.id);return{...p,_h:h};}).sort((a,b)=>b._h-a._h);
+  let projs=[...S.proyectos].map(p=>{
+    const hijas=otsDe(p.id).map(o=>({...o,_h:horasOT(o.id)})).sort((a,b)=>b._h-a._h);
+    const h=horasOT(p.id)+hijas.reduce((a,o)=>a+o._h,0);
+    return{...p,_ots:hijas,_h:h};
+  }).sort((a,b)=>b._h-a._h);
   if(_projFiltro){
-    projs=projs.filter(p=>p.nombre.toLowerCase().includes(_projFiltro)||p.ref.toLowerCase().includes(_projFiltro)||(p.cliente||'').toLowerCase().includes(_projFiltro));
+    projs=projs.filter(p=>p.nombre.toLowerCase().includes(_projFiltro)||p.ref.toLowerCase().includes(_projFiltro)||(p.cliente||'').toLowerCase().includes(_projFiltro)||p._ots.some(o=>String(o.num).toLowerCase().includes(_projFiltro)));
   }
-  list.innerHTML=projs.map(p=>`<div class="proj-item ${currentPage==='ot'&&currentOTId===p.id?'active':''}" onclick="goPage('ot','${p.id}')">
-    <div class="proj-dot" style="background:${p.color||'#888'};"></div>
-    <div class="proj-info">
-      <div class="proj-name">${esc(p.nombre)}</div>
-      <div class="proj-ref">${esc(p.ref)}</div>
-    </div>
-    ${p._h?`<div class="proj-hours">${hFmt(p._h)}</div>`:''}
-    ${p.estado==='Finalizado'?'<span style="font-size:9px;color:var(--muted);">🔒</span>':''}
-  </div>`).join('');
+  list.innerHTML=projs.map(p=>{
+    const cabecera=`<div class="proj-item ${currentPage==='ot'&&currentOTId===p.id?'active':''}" onclick="goPage('ot','${p.id}')">
+      <div class="proj-dot" style="background:${p.color||'#888'};"></div>
+      <div class="proj-info">
+        <div class="proj-name">${esc(p.cliente?p.cliente+' · ':'')}${esc(p.nombre)}</div>
+        <div class="proj-ref">${esc(p.ref)}${p._ots.length?' · '+p._ots.length+' OT'+(p._ots.length>1?'s':''):''}</div>
+      </div>
+      ${p._h?`<div class="proj-hours">${hFmt(p._h)}</div>`:''}
+      ${p.estado==='Finalizado'?'<span style="font-size:9px;color:var(--muted);">🔒</span>':''}
+    </div>`;
+    const hijas=p._ots.map(o=>`<div class="proj-item" style="padding-left:30px;" onclick="event.stopPropagation();goPage('ot','${o.id}')">
+      <div class="proj-dot" style="background:${o.color||p.color||'#888'};"></div>
+      <div class="proj-info">
+        <div class="proj-name">OT ${esc(o.num)}</div>
+        <div class="proj-ref">${esc(o.descripcion||'')}</div>
+      </div>
+      ${o._h?`<div class="proj-hours">${hFmt(o._h)}</div>`:''}
+      ${o.estado==='Finalizado'?'<span style="font-size:9px;color:var(--muted);">🔒</span>':''}
+    </div>`).join('');
+    return cabecera+hijas;
+  }).join('');
 }
 
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');}
@@ -1052,7 +1132,7 @@ function renderDashboard(el,actions){
 
   el.innerHTML=`
   <div class="stat-grid">
-    <div class="stat-card"><div class="stat-label">OTs activas</div><div class="stat-value">${S.proyectos.length}</div></div>
+    <div class="stat-card"><div class="stat-label">OTs activas</div><div class="stat-value">${S.ots.filter(o=>o.estado!=='Finalizado'&&o.estado!=='Cerrado').length}</div></div>
     <div class="stat-card"><div class="stat-label">Horas hoy</div><div class="stat-value amber">${hFmt(horasHoy)}</div></div>
     <div class="stat-card"><div class="stat-label">Gastos hoy</div><div class="stat-value amber">${fmtMoneda(gastosHoy)}</div></div>
     <div class="stat-card"><div class="stat-label">Horas semana</div><div class="stat-value">${hFmt(horasSem)}</div></div>
@@ -1184,7 +1264,7 @@ function editGastoAdmin(id){
   _editGastoId=id;
   // Populate OT select
   const sel=document.getElementById('mg-ot');
-  sel.innerHTML=`<option value="">Selecciona OT...</option>`+S.proyectos.map(p=>`<option value="${p.id}" ${g.proyId===p.id?'selected':''}>${esc(p.ref)} ${esc(p.nombre)}</option>`).join('');
+  sel.innerHTML=`<option value="">Selecciona OT...</option>`+itemsSeleccionables(false).map(it=>`<option value="${it.id}" ${g.proyId===it.id?'selected':''}>${esc(it.label)}${it.sub?' · '+esc(it.sub):''}</option>`).join('');
   document.getElementById('mg-fecha').value=g.fecha||todayStr();
   document.getElementById('mg-tipo').value=g.tipo||'dieta';
   document.getElementById('mg-importe').value=g.importe||'';
@@ -1498,8 +1578,8 @@ function abrirModalHoras(id){
 function buildHorasCascade(){
   const el=document.getElementById('mh-cascade');
   // Step 1: OT
-  // Solo mostrar OTs abiertas al trabajador
-  let projs=[...S.proyectos].filter(p=>p.estado!=='Finalizado'&&p.estado!=='Cerrado').map(p=>{const h=horasOT(p.id);return{...p,_h:h};}).sort((a,b)=>b._h-a._h);
+  // Solo mostrar OTs/proyectos abiertos al trabajador
+  let items=itemsSeleccionables(true);
   const selOT=_mhOTId?getOT(_mhOTId):null;
   const selTipo=_mhTipoTrabajo;
 
@@ -1509,15 +1589,15 @@ function buildHorasCascade(){
       <div class="cascade-hdr" onclick="this.nextElementSibling.classList.toggle('open')">
         <div class="cascade-num ${_mhOTId?'done':''}">${_mhOTId?'✓':'1'}</div>
         <div class="cascade-label">OT / Proyecto</div>
-        ${selOT?`<div class="cascade-val">${esc(selOT.ref)} ${esc(selOT.nombre)}</div>`:''}
+        ${selOT?`<div class="cascade-val">${esc(selOT.nombre)}</div>`:''}
       </div>
       <div class="cascade-body ${!_mhOTId?'open':''}">
         <div class="cascade-search"><input type="text" placeholder="Buscar OT..." oninput="filtrarOTCascade(this.value,'mh-ot-list')" id="mh-ot-search"></div>
         <div class="cascade-opts" id="mh-ot-list">
-          ${projs.map(p=>`<div class="cascade-opt ${_mhOTId===p.id?'sel':''}" onclick="selOTHoras('${p.id}')">
-            <div class="proj-dot" style="background:${p.color||'#888'};flex-shrink:0;"></div>
-            <span style="flex:1;">${esc(p.ref)} ${esc(p.nombre)}</span>
-            ${p._h?`<span class="text-xs text-muted">${hFmt(p._h)}</span>`:''}
+          ${items.map(it=>`<div class="cascade-opt ${_mhOTId===it.id?'sel':''}" onclick="selOTHoras('${it.id}')">
+            <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;"></div>
+            <span style="flex:1;">${esc(it.label)}${it.sub?' <span class="text-xs text-muted">· '+esc(it.sub)+'</span>':''}</span>
+            ${it._h?`<span class="text-xs text-muted">${hFmt(it._h)}</span>`:''}
           </div>`).join('')}
         </div>
       </div>
@@ -1539,12 +1619,12 @@ function buildHorasCascade(){
 
 function filtrarOTCascade(v,listId){
   const filtro=v.toLowerCase();
-  const projs=[...S.proyectos].map(p=>{const h=horasOT(p.id);return{...p,_h:h};}).sort((a,b)=>b._h-a._h)
-    .filter(p=>!filtro||p.nombre.toLowerCase().includes(filtro)||p.ref.toLowerCase().includes(filtro)||(p.cliente||'').toLowerCase().includes(filtro));
-  document.getElementById(listId).innerHTML=projs.map(p=>`<div class="cascade-opt ${_mhOTId===p.id?'sel':''}" onclick="selOTHoras('${p.id}')">
-    <div class="proj-dot" style="background:${p.color||'#888'};flex-shrink:0;"></div>
-    <span style="flex:1;">${esc(p.ref)} ${esc(p.nombre)}</span>
-    ${p._h?`<span class="text-xs text-muted">${hFmt(p._h)}</span>`:''}
+  const items=itemsSeleccionables(true)
+    .filter(it=>!filtro||it.label.toLowerCase().includes(filtro)||(it.sub||'').toLowerCase().includes(filtro));
+  document.getElementById(listId).innerHTML=items.map(it=>`<div class="cascade-opt ${_mhOTId===it.id?'sel':''}" onclick="selOTHoras('${it.id}')">
+    <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;"></div>
+    <span style="flex:1;">${esc(it.label)}${it.sub?' <span class="text-xs text-muted">· '+esc(it.sub)+'</span>':''}</span>
+    ${it._h?`<span class="text-xs text-muted">${hFmt(it._h)}</span>`:''}
   </div>`).join('');
 }
 
@@ -1588,10 +1668,9 @@ function abrirModalGasto(id){
   // Populate OT select
   const sel=document.getElementById('mg-ot');
   const selOTId=g?.proyId||currentOTId||'';
-  sel.innerHTML=`<option value="">Selecciona OT...</option>`+[...S.proyectos].map(p=>{
-    const h=horasOT(p.id);
-    return`<option value="${p.id}" ${selOTId===p.id?'selected':''}>${esc(p.ref)} ${esc(p.nombre)} ${h?'('+hFmt(h)+')':''}</option>`;
-  }).join('');
+  sel.innerHTML=`<option value="">Selecciona OT...</option>`+itemsSeleccionables(false).map(it=>
+    `<option value="${it.id}" ${selOTId===it.id?'selected':''}>${esc(it.label)}${it.sub?' · '+esc(it.sub):''} ${it._h?'('+hFmt(it._h)+')':''}</option>`
+  ).join('');
   document.getElementById('mg-fecha').value=g?.fecha||_workerDate;
   document.getElementById('mg-tipo').value=g?.tipo||'dieta';
   document.getElementById('mg-importe').value=g?.importe||'';
@@ -1635,13 +1714,42 @@ function deleteGasto(){
 // ════════════════════════════════════════════
 // MODAL OT/PROYECTO
 // ════════════════════════════════════════════
+// true si el id editado/mostrado es una OT (S.ots), false si es un Proyecto (S.proyectos)
+function _esOTId(id){return !!S.ots.find(x=>x.id===id);}
+
+function _actualizarTipoOT(){
+  const tipo=document.getElementById('mot-tipo').value;
+  const esOT=tipo==='ot';
+  document.getElementById('mot-proyecto-padre-group').style.display=esOT?'':'none';
+  document.getElementById('mot-cliente-group').style.display=esOT?'none':'';
+  document.getElementById('mot-ref-label').textContent=esOT?'Número de OT':'Referencia (PROY000)';
+  document.getElementById('mot-ref').placeholder=esOT?'441':'PROY000';
+  document.getElementById('mot-nombre-label').textContent=esOT?'Descripción de la OT':'Nombre / Descripción';
+  if(esOT){
+    const sel=document.getElementById('mot-proyecto-padre');
+    sel.innerHTML=[...S.proyectos].sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es'))
+      .map(p=>`<option value="${p.id}">${esc(p.cliente?p.cliente+' · ':'')}${esc(p.ref)} ${esc(p.nombre)}</option>`).join('');
+  }
+}
+
 function openModalOT(id){
   _editOTId=id||null;
+  const esOT=id?_esOTId(id):false;
   const ot=id?getOT(id):null;
-  document.getElementById('mot-title').textContent=ot?'Editar OT/Proyecto':'Nueva OT / Proyecto';
-  document.getElementById('mot-ref').value=ot?.ref||'';
-  document.getElementById('mot-nombre').value=ot?.nombre||'';
-  document.getElementById('mot-cliente').value=ot?.cliente||'';
+  const proy=esOT?S.proyectos.find(p=>p.id===ot.proyectoId):null;
+  document.getElementById('mot-title').textContent=ot?(esOT?'Editar OT':'Editar Proyecto'):'Nueva OT / Proyecto';
+  document.getElementById('mot-tipo-group').style.display=id?'none':'';
+  document.getElementById('mot-tipo').value=esOT?'ot':'proyecto';
+  _actualizarTipoOT();
+  if(esOT){
+    document.getElementById('mot-proyecto-padre').value=ot.proyectoId||'';
+    document.getElementById('mot-ref').value=ot.num||'';
+    document.getElementById('mot-nombre').value=ot.descripcion||'';
+  }else{
+    document.getElementById('mot-ref').value=ot?.ref||'';
+    document.getElementById('mot-nombre').value=ot?.nombre||'';
+    document.getElementById('mot-cliente').value=ot?.cliente||'';
+  }
   document.getElementById('mot-color').value=ot?.color||'#c0272d';
   document.getElementById('mot-del-btn').style.display=ot?'inline-flex':'none';
   const estadoGroup=document.getElementById('mot-estado-group');
@@ -1651,22 +1759,39 @@ function openModalOT(id){
 }
 
 async function guardarOT(){
+  const esOT=_editOTId?_esOTId(_editOTId):document.getElementById('mot-tipo').value==='ot';
   const ref=document.getElementById('mot-ref').value.trim();
   const nombre=document.getElementById('mot-nombre').value.trim();
-  if(!ref||!nombre)return alert('Referencia y nombre son obligatorios');
-  let ot;
+  if(!ref||!nombre)return alert(esOT?'Número y descripción son obligatorios':'Referencia y nombre son obligatorios');
+  const color=document.getElementById('mot-color').value;
+  const estado=_editOTId?(document.getElementById('mot-estado').value||'En proceso'):'En proceso';
+  let item,lista;
   _spSaveEnCurso++;
   try{
-    const estado=_editOTId?(document.getElementById('mot-estado').value||'En proceso'):'En proceso';
-    if(_editOTId){
-      ot=S.proyectos.find(x=>x.id===_editOTId);
-      if(ot)Object.assign(ot,{ref,nombre,cliente:document.getElementById('mot-cliente').value.trim(),color:document.getElementById('mot-color').value,estado});
+    if(esOT){
+      lista='ots';
+      const proyectoId=document.getElementById('mot-proyecto-padre').value;
+      if(!proyectoId)return alert('Selecciona el Proyecto al que pertenece esta OT');
+      if(_editOTId){
+        item=S.ots.find(x=>x.id===_editOTId);
+        if(item)Object.assign(item,{proyectoId,num:ref,descripcion:nombre,color,estado});
+      }else{
+        item={id:uid(),proyectoId,num:ref,descripcion:nombre,color,estado:'En proceso',creado:new Date().toISOString()};
+        S.ots.push(item);
+      }
     }else{
-      ot={id:uid(),ref,nombre,cliente:document.getElementById('mot-cliente').value.trim(),color:document.getElementById('mot-color').value,estado:'En proceso',creado:new Date().toISOString()};
-      S.proyectos.push(ot);
+      lista='proyectos';
+      const cliente=document.getElementById('mot-cliente').value.trim();
+      if(_editOTId){
+        item=S.proyectos.find(x=>x.id===_editOTId);
+        if(item)Object.assign(item,{ref,nombre,cliente,color,estado});
+      }else{
+        item={id:uid(),ref,nombre,cliente,color,estado:'En proceso',creado:new Date().toISOString()};
+        S.proyectos.push(item);
+      }
     }
     save();closeModal('modal-ot');renderPage(currentPage);renderProyList();
-    if(ot)await spGuardar('proyectos',ot);
+    if(item)await spGuardar(lista,item);
   }finally{
     _spSaveEnCurso=Math.max(0,_spSaveEnCurso-1);
     if(msalToken)setTimeout(()=>cargarDesdeSP(false).then(()=>{renderPage(currentPage);renderProyList();}),2000);
@@ -1674,24 +1799,29 @@ async function guardarOT(){
 }
 
 async function toggleEstadoOT(id){
-  const ot=S.proyectos.find(x=>x.id===id);if(!ot)return;
-  const nuevo=ot.estado==='Finalizado'?'En proceso':'Finalizado';
+  const esOT=_esOTId(id);
+  const item=esOT?S.ots.find(x=>x.id===id):S.proyectos.find(x=>x.id===id);
+  if(!item)return;
+  const ot=getOT(id);
+  const nuevo=item.estado==='Finalizado'?'En proceso':'Finalizado';
   const accion=nuevo==='Finalizado'?'cerrar':'reabrir';
   if(!confirm(`¿${accion.charAt(0).toUpperCase()+accion.slice(1)} esta OT?\n${nuevo==='Finalizado'?'Los técnicos no podrán fichar más horas.':'Los técnicos podrán volver a fichar horas.'}\n\nOT: ${ot.nombre}`))return;
-  ot.estado=nuevo;
+  item.estado=nuevo;
   save();renderPage(currentPage);renderProyList();
-  await spGuardar('proyectos',ot);
+  await spGuardar(esOT?'ots':'proyectos',item);
   showSync(nuevo==='Finalizado'?'🔒 OT cerrada':'🔓 OT reabierta',true);
 }
 
 async function deleteOT(){
   if(!confirm('¿Eliminar esta OT/Proyecto?'))return;
   const id=_editOTId;
-  _addTumba('proyectos',id);
-  S.proyectos=S.proyectos.filter(x=>x.id!==id);
+  const esOT=_esOTId(id);
+  _addTumba(esOT?'ots':'proyectos',id);
+  if(esOT)S.ots=S.ots.filter(x=>x.id!==id);
+  else S.proyectos=S.proyectos.filter(x=>x.id!==id);
   save();closeModal('modal-ot');goPage('dashboard');
-  try{await spEliminar('proyectos',id);showSync('✓ OT eliminada',true);}
-  catch(e){showSync('⚠ Eliminada localmente',false);}
+  try{await spEliminar(esOT?'ots':'proyectos',id);showSync('✓ eliminado',true);}
+  catch(e){showSync('⚠ Eliminado localmente',false);}
 }
 
 // ════════════════════════════════════════════
