@@ -1861,7 +1861,11 @@ async function guardarOT(){
   const esOT=_editOTId?_esOTId(_editOTId):document.getElementById('mot-tipo').value==='ot';
   const ref=document.getElementById('mot-ref').value.trim();
   const nombre=document.getElementById('mot-nombre').value.trim();
-  if(!ref||!nombre)return alert(esOT?'Número y descripción son obligatorios':'Referencia y nombre son obligatorios');
+  if(esOT){
+    if(!ref)return alert('El número de OT es obligatorio');
+  }else{
+    if(!ref||!nombre)return alert('Referencia y nombre son obligatorios');
+  }
   const color=document.getElementById('mot-color').value;
   const estado=_editOTId?(document.getElementById('mot-estado').value||'En proceso'):'En proceso';
   let item,lista;
