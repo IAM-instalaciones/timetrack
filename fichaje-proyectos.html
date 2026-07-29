@@ -862,23 +862,54 @@ async function cargarDesdeSP(mostrarMsg=true){
 }
 
 async function importarOTsDesdeManifiesto(){
-  showSync('\u27f3 Buscando OTs nuevas en el Manifiesto...',false);
-  const tok=await getToken();
-  if(!tok){showSync('\u26a0 Sin token \u2014 inicia sesi\u00f3n con Microsoft 365',false);return;}
+  let token = localStorage.getItem('tt_gh_token');
+  if(!token){
+    token = prompt('Pega aqu\u00ed el token de GitHub (el mismo que usas en el Manifiesto Comercial \u2192 Configuraci\u00f3n):');
+    if(!token)return;
+    token = token.trim();
+    localStorage.setItem('tt_gh_token', token);
+  }
+  showSync('\u27f3 Leyendo OTs del Manifiesto (GitHub)...', false);
   try{
-    const res=await spFetch(spUrl('ots')+'?$top=5000&$select=SPData');
-    const items=(res&&res.value)?res.value:[];
-    let ok=0;
-    items.forEach(it=>{
-      try{const ot=JSON.parse(it.SPData);attachOT(ot);ok++;}catch(e){}
+    const res = await fetch('https://api.github.com/repos/IAM-instalaciones/iam-gestion/contents/datos.json?ref=main&t=' + Date.now(), {
+      headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github.v3+json' }
+    });
+    if(res.status === 401 || res.status === 403){
+      localStorage.removeItem('tt_gh_token');
+      throw new Error('Token de GitHub inv\u00e1lido o sin permisos (c\u00f3digo ' + res.status + ')');
+    }
+    if(!res.ok)throw new Error('GitHub respondi\u00f3 ' + res.status);
+    const data = await res.json();
+    const bin = atob((data.content || '').replace(/\n/g, ''));
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    const json = new TextDecoder('utf-8').decode(bytes);
+    const S2 = JSON.parse(json);
+    const clientes = S2.clientes || [];
+    const oportunidades = S2.oportunidades || [];
+    const ordenes = S2.ordenes || [];
+    let ok = 0;
+    ordenes.forEach(ot => {
+      const opo = oportunidades.find(o => o.id === ot.opoId);
+      const cli = opo ? clientes.find(c => c.id === opo.cliente) : null;
+      attachOT({
+        id: 'ot_' + ot.id,
+        num: ot.num,
+        ref: opo ? (opo.referencia || '') : '',
+        cliente: cli ? cli.nombre : '',
+        descripcion: ot.descripcion || '',
+        estado: ot.estado || 'En proceso',
+        fecha: ot.fecha || '',
+        color: '#c0272d',
+        creado: ot.fecha || new Date().toISOString().slice(0, 10)
+      });
+      ok++;
     });
     save();renderProyList();renderPage(currentPage);
-    showSync('\u2713 '+ok+' OTs sincronizadas desde el Manifiesto',true);
-    alert('\u2713 '+ok+' OTs le\u00eddas desde el Manifiesto Comercial (v\u00eda SharePoint)');
+    showSync('\u2713 ' + ok + ' OTs sincronizadas desde el Manifiesto', true);
   }catch(e){
-    console.error('importarOTsDesdeManifiesto',e);
-    showSync('\u26a0 Error leyendo OTs de SharePoint',false);
-    alert('No se pudo leer la lista TT_OTs de SharePoint: '+e.message);
+    console.error('importarOTsDesdeManifiesto', e);
+    showSync('\u26a0 Error leyendo datos del Manifiesto', false);
+    alert('No se pudo leer datos.json de GitHub: ' + e.message);
   }
 }
 
