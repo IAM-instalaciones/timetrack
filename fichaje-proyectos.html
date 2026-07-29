@@ -321,6 +321,9 @@ select.form-input{cursor:pointer;}
       <div class="nav-item" onclick="goPage('dashboard')" id="nav-dashboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard
       </div>
+      <div class="nav-item" onclick="goPage('otsadmin')" id="nav-otsadmin">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>OTs
+      </div>
       <div class="nav-item" onclick="goPage('fichajes')" id="nav-fichajes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>Fichajes
       </div>
@@ -347,18 +350,6 @@ select.form-input{cursor:pointer;}
       <div class="nav-item" onclick="goPage('calendario')" id="nav-calendario">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Calendario
       </div>
-    </div>
-
-    <!-- Project list -->
-    <div class="sb-projs">
-      <div class="flex items-center justify-between" style="padding:8px 16px 0;">
-        <div class="sb-label" style="padding:0;">Proyectos / OTs</div>
-        <button class="btn btn-sm" onclick="openModalOT()" id="btn-add-ot" style="display:none;padding:2px 8px;font-size:11px;">+</button>
-      </div>
-      <div class="sb-proj-search">
-        <input type="text" placeholder="Buscar..." oninput="filtrarProyectos(this.value)" id="proj-search">
-      </div>
-      <div id="proj-list"></div>
     </div>
 
     <div style="padding:12px;border-top:1px solid var(--border);">
@@ -924,19 +915,23 @@ function getOT(id){
 }
 function otsDe(proyId){return S.ots.filter(o=>o.proyectoId===proyId);}
 
-// Lista de elementos seleccionables para fichar horas/gastos: OTs (agrupadas por su Proyecto)
-// + Proyectos sin OTs propias (para poder fichar directamente sobre el proyecto).
-function itemsSeleccionables(soloAbiertos){
-  const items=[];
-  [...S.proyectos].sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es')).forEach(p=>{
-    const hijas=otsDe(p.id).filter(o=>!soloAbiertos||(o.estado!=='Finalizado'&&o.estado!=='Cerrado'));
-    if(hijas.length){
-      hijas.forEach(o=>items.push({id:o.id,label:'OT '+o.num+(o.descripcion?' – '+o.descripcion:''),sub:(p.cliente?p.cliente+' · ':'')+(p.ref||p.nombre),color:o.color||p.color,_h:horasOT(o.id),estado:o.estado}));
-    }else if(!soloAbiertos||(p.estado!=='Finalizado'&&p.estado!=='Cerrado')){
-      items.push({id:p.id,label:(p.ref||'')+' '+(p.nombre||''),sub:p.cliente||'',color:p.color,_h:horasOT(p.id),estado:p.estado});
-    }
-  });
-  return items.sort((a,b)=>b._h-a._h);
+// Lista simple de OTs para fichar horas/gastos: "OT {num} {cliente}".
+// Por defecto solo las abiertas; incluirId permite mantener visible el elemento
+// actualmente asignado a un registro aunque esté cerrado (o sea un Proyecto histórico).
+function _describirSeleccionable(o){
+  if(o.proyectoId!==undefined){
+    const p=S.proyectos.find(x=>x.id===o.proyectoId);
+    return{id:o.id,label:'OT '+o.num+(p&&p.cliente?' '+p.cliente:''),color:o.color||(p&&p.color)||'#888',_h:horasOT(o.id),estado:o.estado};
+  }
+  return{id:o.id,label:(o.ref?o.ref+' ':'')+(o.nombre||''),color:o.color||'#888',_h:horasOT(o.id),estado:o.estado};
+}
+function itemsSeleccionables(incluirId){
+  let base=S.ots.filter(o=>o.estado!=='Finalizado'&&o.estado!=='Cerrado');
+  if(incluirId&&!base.find(o=>o.id===incluirId)){
+    const extra=S.ots.find(o=>o.id===incluirId)||S.proyectos.find(p=>p.id===incluirId);
+    if(extra)base=[extra,...base];
+  }
+  return base.map(_describirSeleccionable).sort((a,b)=>b._h-a._h);
 }
 function getTrab(id){return S.trabajadores.find(x=>x.id===id);}
 function horasOT(otId){return S.registros.filter(r=>r.proyId===otId).reduce((a,r)=>a+(+r.horas||0),0);}
@@ -1011,17 +1006,14 @@ function startApp(){
   const badge=document.getElementById('session-badge');
   const adminNav=document.getElementById('admin-nav');
   const workerNav=document.getElementById('worker-nav');
-  const btnAddOT=document.getElementById('btn-add-ot');
   if(session.role==='admin'){
     badge.textContent='Admin';badge.className='sidebar-badge';
     adminNav.classList.remove('hidden');workerNav.classList.add('hidden');
-    btnAddOT.style.display='';
     goPage('dashboard');
   }else{
     const w=getTrab(session.workerId);
     badge.textContent=w?w.nombre:'?';badge.className='sidebar-badge worker';
     adminNav.classList.add('hidden');workerNav.classList.remove('hidden');
-    btnAddOT.style.display='none';
     goPage('hoy');
   }
   if(msalToken)cargarDesdeSP(false).then(()=>{renderPage(currentPage);renderProyList();});
@@ -1040,7 +1032,7 @@ function logout(){
 // ════════════════════════════════════════════
 // NAVEGACIÓN
 // ════════════════════════════════════════════
-const PAGE_TITLES={dashboard:'Dashboard',fichajes:'Fichajes',gastos:'Gastos',
+const PAGE_TITLES={dashboard:'Dashboard',otsadmin:'OTs',fichajes:'Fichajes',gastos:'Gastos',
   trabajadores:'Trabajadores',tipos:'Tipos de trabajo',informe:'Informe',
   hoy:'Registro diario',calendario:'Calendario',ot:''};
 
@@ -1062,6 +1054,7 @@ function renderPage(page){
   actions.innerHTML='';sub.textContent='';
   title.textContent=PAGE_TITLES[page]||'';
   if(page==='dashboard')renderDashboard(content,actions);
+  else if(page==='otsadmin')renderOTsAdmin(content,actions);
   else if(page==='fichajes')renderFichajes(content,actions);
   else if(page==='gastos')renderGastos(content,actions);
   else if(page==='trabajadores')renderTrabajadores(content,actions);
@@ -1173,6 +1166,43 @@ function renderDashboard(el,actions){
 }
 
 // ════════════════════════════════════════════
+// OTs (ADMIN) — listado, apertura/cierre y totales
+// ════════════════════════════════════════════
+function renderOTsAdmin(el,actions){
+  actions.innerHTML=`
+    <input type="text" placeholder="Buscar OT, cliente, proyecto..." oninput="filtrarOTsAdmin(this.value)" id="search-otsadmin" style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:220px;">
+    <button class="btn btn-sm" onclick="importarOTsDesdeManifiesto()" style="background:#1d6f42;color:#fff;border-color:#1d6f42;">📥 Importar OTs del Manifiesto</button>
+    <button class="btn btn-primary btn-sm" onclick="openModalOT()">+ Nueva OT/Proyecto</button>`;
+  _renderOTsAdminTable(el,'');
+}
+function filtrarOTsAdmin(v){_renderOTsAdminTable(document.getElementById('main-content'),v);}
+
+function _renderOTsAdminTable(el,filtro){
+  const f=(filtro||'').toLowerCase();
+  let filas=S.ots.map(o=>{
+    const p=S.proyectos.find(x=>x.id===o.proyectoId);
+    const horas=horasOT(o.id);
+    const gastos=S.gastos.filter(g=>g.proyId===o.id).reduce((a,g)=>a+(+g.importe||0),0);
+    return{ot:o,proy:p,horas,gastos};
+  });
+  if(f)filas=filas.filter(x=>String(x.ot.num).toLowerCase().includes(f)||(x.proy?.cliente||'').toLowerCase().includes(f)||(x.proy?.ref||'').toLowerCase().includes(f)||(x.ot.descripcion||'').toLowerCase().includes(f));
+  filas.sort((a,b)=>b.horas-a.horas);
+  el.innerHTML=`<div class="table-wrap"><table class="table">
+    <thead><tr><th>OT</th><th>Cliente</th><th>Proyecto</th><th>Descripción</th><th>Horas</th><th>Gastos</th><th>Estado</th><th></th></tr></thead>
+    <tbody>${filas.map(({ot,proy,horas,gastos})=>`<tr style="cursor:pointer;" onclick="goPage('ot','${ot.id}')">
+      <td class="font-bold"><span class="proj-dot" style="background:${ot.color||proy?.color||'#888'};display:inline-block;"></span> OT ${esc(ot.num)}</td>
+      <td>${esc(proy?.cliente||'—')}</td>
+      <td>${esc(proy?.ref||'—')}</td>
+      <td class="text-muted text-sm">${esc(ot.descripcion||'')}</td>
+      <td class="font-bold">${hFmt(horas)}</td>
+      <td class="amber font-bold">${fmtMoneda(gastos)}</td>
+      <td>${ot.estado==='Finalizado'?'<span style="font-size:11px;color:var(--muted);">🔒 Cerrada</span>':'<span style="font-size:11px;color:var(--red);">● Abierta</span>'}</td>
+      <td><button class="btn btn-sm ${ot.estado==='Finalizado'?'btn-primary':'btn-red'}" onclick="event.stopPropagation();toggleEstadoOT('${ot.id}')">${ot.estado==='Finalizado'?'Reabrir':'Cerrar'}</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>${filas.length?'':'<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px;">Sin OTs. Créalas aquí o impórtalas desde el Manifiesto Comercial.</div>'}`;
+}
+
+// ════════════════════════════════════════════
 // FICHAJES (ADMIN)
 // ════════════════════════════════════════════
 function renderFichajes(el,actions){
@@ -1264,7 +1294,7 @@ function editGastoAdmin(id){
   _editGastoId=id;
   // Populate OT select
   const sel=document.getElementById('mg-ot');
-  sel.innerHTML=`<option value="">Selecciona OT...</option>`+itemsSeleccionables(false).map(it=>`<option value="${it.id}" ${g.proyId===it.id?'selected':''}>${esc(it.label)}${it.sub?' · '+esc(it.sub):''}</option>`).join('');
+  sel.innerHTML=`<option value="">Selecciona OT...</option>`+itemsSeleccionables(g.proyId).map(it=>`<option value="${it.id}" ${g.proyId===it.id?'selected':''}>${esc(it.label)}</option>`).join('');
   document.getElementById('mg-fecha').value=g.fecha||todayStr();
   document.getElementById('mg-tipo').value=g.tipo||'dieta';
   document.getElementById('mg-importe').value=g.importe||'';
@@ -1303,8 +1333,7 @@ function renderTrabajadores(el,actions){
 // TIPOS DE TRABAJO (ADMIN)
 // ════════════════════════════════════════════
 function renderTipos(el,actions){
-  actions.innerHTML=`<button class="btn btn-primary btn-sm" onclick="openModalTipo()">+ Tipo de trabajo</button>
-    <button class="btn btn-sm" onclick="importarOTsDesdeManifiesto()" style="background:#1d6f42;color:#fff;border-color:#1d6f42;">📥 Importar OTs del Manifiesto</button>`;
+  actions.innerHTML=`<button class="btn btn-primary btn-sm" onclick="openModalTipo()">+ Tipo de trabajo</button>`;
   el.innerHTML=`<div class="table-wrap"><table class="table">
     <thead><tr><th>Tipo de trabajo</th><th>Usos</th><th></th></tr></thead>
     <tbody>${S.tiposTrabajo.map((t,i)=>{
@@ -1579,7 +1608,7 @@ function buildHorasCascade(){
   const el=document.getElementById('mh-cascade');
   // Step 1: OT
   // Solo mostrar OTs/proyectos abiertos al trabajador
-  let items=itemsSeleccionables(true);
+  let items=itemsSeleccionables(_mhOTId);
   const selOT=_mhOTId?getOT(_mhOTId):null;
   const selTipo=_mhTipoTrabajo;
 
@@ -1588,7 +1617,7 @@ function buildHorasCascade(){
     <div class="cascade-step">
       <div class="cascade-hdr" onclick="this.nextElementSibling.classList.toggle('open')">
         <div class="cascade-num ${_mhOTId?'done':''}">${_mhOTId?'✓':'1'}</div>
-        <div class="cascade-label">OT / Proyecto</div>
+        <div class="cascade-label">OT</div>
         ${selOT?`<div class="cascade-val">${esc(selOT.nombre)}</div>`:''}
       </div>
       <div class="cascade-body ${!_mhOTId?'open':''}">
@@ -1596,7 +1625,7 @@ function buildHorasCascade(){
         <div class="cascade-opts" id="mh-ot-list">
           ${items.map(it=>`<div class="cascade-opt ${_mhOTId===it.id?'sel':''}" onclick="selOTHoras('${it.id}')">
             <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;"></div>
-            <span style="flex:1;">${esc(it.label)}${it.sub?' <span class="text-xs text-muted">· '+esc(it.sub)+'</span>':''}</span>
+            <span style="flex:1;">${esc(it.label)}</span>
             ${it._h?`<span class="text-xs text-muted">${hFmt(it._h)}</span>`:''}
           </div>`).join('')}
         </div>
@@ -1619,11 +1648,11 @@ function buildHorasCascade(){
 
 function filtrarOTCascade(v,listId){
   const filtro=v.toLowerCase();
-  const items=itemsSeleccionables(true)
-    .filter(it=>!filtro||it.label.toLowerCase().includes(filtro)||(it.sub||'').toLowerCase().includes(filtro));
+  const items=itemsSeleccionables(_mhOTId)
+    .filter(it=>!filtro||it.label.toLowerCase().includes(filtro));
   document.getElementById(listId).innerHTML=items.map(it=>`<div class="cascade-opt ${_mhOTId===it.id?'sel':''}" onclick="selOTHoras('${it.id}')">
     <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;"></div>
-    <span style="flex:1;">${esc(it.label)}${it.sub?' <span class="text-xs text-muted">· '+esc(it.sub)+'</span>':''}</span>
+    <span style="flex:1;">${esc(it.label)}</span>
     ${it._h?`<span class="text-xs text-muted">${hFmt(it._h)}</span>`:''}
   </div>`).join('');
 }
@@ -1668,8 +1697,8 @@ function abrirModalGasto(id){
   // Populate OT select
   const sel=document.getElementById('mg-ot');
   const selOTId=g?.proyId||currentOTId||'';
-  sel.innerHTML=`<option value="">Selecciona OT...</option>`+itemsSeleccionables(false).map(it=>
-    `<option value="${it.id}" ${selOTId===it.id?'selected':''}>${esc(it.label)}${it.sub?' · '+esc(it.sub):''} ${it._h?'('+hFmt(it._h)+')':''}</option>`
+  sel.innerHTML=`<option value="">Selecciona OT...</option>`+itemsSeleccionables(selOTId).map(it=>
+    `<option value="${it.id}" ${selOTId===it.id?'selected':''}>${esc(it.label)} ${it._h?'('+hFmt(it._h)+')':''}</option>`
   ).join('');
   document.getElementById('mg-fecha').value=g?.fecha||_workerDate;
   document.getElementById('mg-tipo').value=g?.tipo||'dieta';
