@@ -501,6 +501,10 @@ select.form-input{cursor:pointer;}
       <label class="form-label">Cliente</label>
       <input type="text" class="form-input" id="mot-cliente" placeholder="Nombre del cliente">
     </div>
+    <div class="form-group" id="mot-asignado-group" style="display:none;">
+      <label class="form-label">Asignar a técnicos (ninguno marcado = todos)</label>
+      <div id="mot-asignado-list" style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);padding:8px;"></div>
+    </div>
     <div class="form-group" id="mot-estado-group" style="display:none;">
       <label class="form-label">Estado</label>
       <select class="form-input" id="mot-estado">
@@ -934,6 +938,7 @@ function _describirSeleccionable(o){
 }
 function itemsSeleccionables(incluirId){
   let base=S.ots.filter(o=>o.estado!=='Finalizado'&&o.estado!=='Cerrado');
+  if(session.role==='worker')base=base.filter(o=>{const a=Array.isArray(o.asignadoA)?o.asignadoA:(o.asignadoA?[o.asignadoA]:[]);return!a.length||a.includes(session.workerId);});
   if(incluirId&&!base.find(o=>o.id===incluirId)){
     const extra=S.ots.find(o=>o.id===incluirId)||S.proyectos.find(p=>p.id===incluirId);
     if(extra)base=[extra,...base];
@@ -1220,6 +1225,7 @@ function _renderOTsAdminTable(el,filtro){
       <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('cliente')">Cliente${_flechaOrden('cliente')}</th>
       <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('proyecto')">Proyecto${_flechaOrden('proyecto')}</th>
       <th>Descripción</th>
+      <th>Asignada a</th>
       <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('horas')">Horas${_flechaOrden('horas')}</th>
       <th>Gastos</th>
       <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('estado')">Estado${_flechaOrden('estado')}</th>
@@ -1230,6 +1236,7 @@ function _renderOTsAdminTable(el,filtro){
       <td>${esc(proy?.cliente||'—')}</td>
       <td>${esc(proy?.ref||'—')}</td>
       <td class="text-muted text-sm">${esc(ot.descripcion||'')}</td>
+      <td class="text-sm">${(Array.isArray(ot.asignadoA)?ot.asignadoA:(ot.asignadoA?[ot.asignadoA]:[])).length?esc((Array.isArray(ot.asignadoA)?ot.asignadoA:[ot.asignadoA]).map(id=>getTrab(id)?.nombre||'?').join(', ')):'<span class="text-muted">Todos</span>'}</td>
       <td class="font-bold">${hFmt(horas)}</td>
       <td class="amber font-bold">${fmtMoneda(gastos)}</td>
       <td>${ot.estado==='Finalizado'?'<span style="font-size:11px;color:var(--muted);">🔒 Cerrada</span>':'<span style="font-size:11px;color:var(--red);">● Abierta</span>'}</td>
@@ -1806,6 +1813,7 @@ function _actualizarTipoOT(){
   const esOT=tipo==='ot';
   document.getElementById('mot-proyecto-padre-group').style.display=esOT?'':'none';
   document.getElementById('mot-cliente-group').style.display=esOT?'none':'';
+  document.getElementById('mot-asignado-group').style.display=esOT?'':'none';
   document.getElementById('mot-ref-label').textContent=esOT?'Número de OT':'Referencia (PROY000)';
   document.getElementById('mot-ref').placeholder=esOT?'441':'PROY000';
   document.getElementById('mot-nombre-label').textContent=esOT?'Descripción de la OT':'Nombre / Descripción';
@@ -1813,6 +1821,11 @@ function _actualizarTipoOT(){
     const sel=document.getElementById('mot-proyecto-padre');
     sel.innerHTML=[...S.proyectos].sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es'))
       .map(p=>`<option value="${p.id}">${esc(p.cliente?p.cliente+' · ':'')}${esc(p.ref)} ${esc(p.nombre)}</option>`).join('');
+    const listA=document.getElementById('mot-asignado-list');
+    listA.innerHTML=[...S.trabajadores].sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es'))
+      .map(t=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+        <input type="checkbox" class="mot-asignado-chk" value="${t.id}"> ${esc(t.nombre)}
+      </label>`).join('')||'<span class="text-muted text-sm">No hay técnicos dados de alta</span>';
   }
 }
 
@@ -1829,6 +1842,8 @@ function openModalOT(id){
     document.getElementById('mot-proyecto-padre').value=ot.proyectoId||'';
     document.getElementById('mot-ref').value=ot.num||'';
     document.getElementById('mot-nombre').value=ot.descripcion||'';
+    const asignados=Array.isArray(ot.asignadoA)?ot.asignadoA:(ot.asignadoA?[ot.asignadoA]:[]);
+    document.querySelectorAll('.mot-asignado-chk').forEach(chk=>{chk.checked=asignados.includes(chk.value);});
   }else{
     document.getElementById('mot-ref').value=ot?.ref||'';
     document.getElementById('mot-nombre').value=ot?.nombre||'';
@@ -1856,11 +1871,12 @@ async function guardarOT(){
       lista='ots';
       const proyectoId=document.getElementById('mot-proyecto-padre').value;
       if(!proyectoId)return alert('Selecciona el Proyecto al que pertenece esta OT');
+      const asignadoA=[...document.querySelectorAll('.mot-asignado-chk:checked')].map(chk=>chk.value);
       if(_editOTId){
         item=S.ots.find(x=>x.id===_editOTId);
-        if(item)Object.assign(item,{proyectoId,num:ref,descripcion:nombre,color,estado});
+        if(item)Object.assign(item,{proyectoId,num:ref,descripcion:nombre,color,estado,asignadoA});
       }else{
-        item={id:uid(),proyectoId,num:ref,descripcion:nombre,color,estado:'En proceso',creado:new Date().toISOString()};
+        item={id:uid(),proyectoId,num:ref,descripcion:nombre,color,estado:'En proceso',asignadoA,creado:new Date().toISOString()};
         S.ots.push(item);
       }
     }else{
