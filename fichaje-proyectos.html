@@ -652,6 +652,13 @@ let _mhOTId = null;
 let _mhTipoTrabajo = null;
 let _projFiltro = '';
 let _spSaveEnCurso = 0;
+let _infTrab = '';
+let _infModo = 'mes'; // 'mes' | 'año'
+let _infMes = new Date().toISOString().slice(0,7);
+let _infAno = String(new Date().getFullYear());
+let _otsOrden = 'horas'; // 'ot' | 'cliente' | 'proyecto' | 'horas'
+let _otsOrdenAsc = false;
+let _otsEstado = 'todas'; // 'todas' | 'abiertas' | 'cerradas'
 
 function save(){localStorage.setItem('tt_v9',JSON.stringify(S));}
 
@@ -1171,11 +1178,21 @@ function renderDashboard(el,actions){
 function renderOTsAdmin(el,actions){
   actions.innerHTML=`
     <input type="text" placeholder="Buscar OT, cliente, proyecto..." oninput="filtrarOTsAdmin(this.value)" id="search-otsadmin" style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:220px;">
+    <select onchange="_otsEstado=this.value;_renderOTsAdminTable(document.getElementById('main-content'),document.getElementById('search-otsadmin').value)" class="form-input" style="width:130px;padding:6px 10px;font-size:13px;">
+      <option value="todas" ${_otsEstado==='todas'?'selected':''}>Todas</option>
+      <option value="abiertas" ${_otsEstado==='abiertas'?'selected':''}>Abiertas</option>
+      <option value="cerradas" ${_otsEstado==='cerradas'?'selected':''}>Cerradas</option>
+    </select>
     <button class="btn btn-sm" onclick="importarOTsDesdeManifiesto()" style="background:#1d6f42;color:#fff;border-color:#1d6f42;">📥 Importar OTs del Manifiesto</button>
     <button class="btn btn-primary btn-sm" onclick="openModalOT()">+ Nueva OT/Proyecto</button>`;
   _renderOTsAdminTable(el,'');
 }
 function filtrarOTsAdmin(v){_renderOTsAdminTable(document.getElementById('main-content'),v);}
+function _ordenarOTsAdmin(campo){
+  if(_otsOrden===campo)_otsOrdenAsc=!_otsOrdenAsc;else{_otsOrden=campo;_otsOrdenAsc=true;}
+  _renderOTsAdminTable(document.getElementById('main-content'),document.getElementById('search-otsadmin')?.value||'');
+}
+function _flechaOrden(campo){return _otsOrden===campo?(_otsOrdenAsc?' ▲':' ▼'):'';}
 
 function _renderOTsAdminTable(el,filtro){
   const f=(filtro||'').toLowerCase();
@@ -1186,9 +1203,28 @@ function _renderOTsAdminTable(el,filtro){
     return{ot:o,proy:p,horas,gastos};
   });
   if(f)filas=filas.filter(x=>String(x.ot.num).toLowerCase().includes(f)||(x.proy?.cliente||'').toLowerCase().includes(f)||(x.proy?.ref||'').toLowerCase().includes(f)||(x.ot.descripcion||'').toLowerCase().includes(f));
-  filas.sort((a,b)=>b.horas-a.horas);
+  if(_otsEstado==='abiertas')filas=filas.filter(x=>x.ot.estado!=='Finalizado');
+  else if(_otsEstado==='cerradas')filas=filas.filter(x=>x.ot.estado==='Finalizado');
+  const dir=_otsOrdenAsc?1:-1;
+  filas.sort((a,b)=>{
+    let va,vb;
+    if(_otsOrden==='ot'){va=String(a.ot.num||'');vb=String(b.ot.num||'');return va.localeCompare(vb,'es',{numeric:true})*dir;}
+    if(_otsOrden==='cliente'){va=a.proy?.cliente||'';vb=b.proy?.cliente||'';return va.localeCompare(vb,'es')*dir;}
+    if(_otsOrden==='proyecto'){va=a.proy?.ref||'';vb=b.proy?.ref||'';return va.localeCompare(vb,'es')*dir;}
+    if(_otsOrden==='estado'){va=a.ot.estado||'';vb=b.ot.estado||'';return va.localeCompare(vb,'es')*dir;}
+    return(a.horas-b.horas)*dir;
+  });
   el.innerHTML=`<div class="table-wrap"><table class="table">
-    <thead><tr><th>OT</th><th>Cliente</th><th>Proyecto</th><th>Descripción</th><th>Horas</th><th>Gastos</th><th>Estado</th><th></th></tr></thead>
+    <thead><tr>
+      <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('ot')">OT${_flechaOrden('ot')}</th>
+      <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('cliente')">Cliente${_flechaOrden('cliente')}</th>
+      <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('proyecto')">Proyecto${_flechaOrden('proyecto')}</th>
+      <th>Descripción</th>
+      <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('horas')">Horas${_flechaOrden('horas')}</th>
+      <th>Gastos</th>
+      <th style="cursor:pointer;" onclick="_ordenarOTsAdmin('estado')">Estado${_flechaOrden('estado')}</th>
+      <th></th>
+    </tr></thead>
     <tbody>${filas.map(({ot,proy,horas,gastos})=>`<tr style="cursor:pointer;" onclick="goPage('ot','${ot.id}')">
       <td class="font-bold"><span class="proj-dot" style="background:${ot.color||proy?.color||'#888'};display:inline-block;"></span> OT ${esc(ot.num)}</td>
       <td>${esc(proy?.cliente||'—')}</td>
@@ -1351,20 +1387,25 @@ function renderTipos(el,actions){
 // INFORME (ADMIN)
 // ════════════════════════════════════════════
 function renderInforme(el,actions){
-  const mesActual=new Date().toISOString().slice(0,7);
+  const anosDisponibles=[...new Set(S.registros.map(r=>r.fecha.slice(0,4)))].sort((a,b)=>b.localeCompare(a));
+  if(!anosDisponibles.includes(_infAno))anosDisponibles.unshift(_infAno);
   actions.innerHTML=`
-    <select id="inf-trab" onchange="renderPage('informe')" class="form-input" style="width:160px;padding:6px 10px;font-size:13px;">
+    <select onchange="_infTrab=this.value;renderPage('informe')" class="form-input" style="width:160px;padding:6px 10px;font-size:13px;">
       <option value="">Todos los trabajadores</option>
-      ${S.trabajadores.map(t=>`<option value="${t.id}">${esc(t.nombre)}</option>`).join('')}
+      ${S.trabajadores.map(t=>`<option value="${t.id}" ${_infTrab===t.id?'selected':''}>${esc(t.nombre)}</option>`).join('')}
     </select>
-    <input type="month" id="inf-mes" value="${mesActual}" onchange="renderPage('informe')" style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;">`;
+    <select onchange="_infModo=this.value;renderPage('informe')" class="form-input" style="width:110px;padding:6px 10px;font-size:13px;">
+      <option value="mes" ${_infModo==='mes'?'selected':''}>Por mes</option>
+      <option value="año" ${_infModo==='año'?'selected':''}>Por año</option>
+    </select>
+    ${_infModo==='mes'
+      ?`<input type="month" value="${_infMes}" onchange="_infMes=this.value;renderPage('informe')" style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;">`
+      :`<select onchange="_infAno=this.value;renderPage('informe')" class="form-input" style="width:100px;padding:6px 10px;font-size:13px;">${anosDisponibles.map(a=>`<option value="${a}" ${_infAno===a?'selected':''}>${a}</option>`).join('')}</select>`
+    }`;
 
-  const trabId=document.getElementById('inf-trab')?.value||'';
-  const mes=document.getElementById('inf-mes')?.value||mesActual;
-
-  let regs=S.registros.filter(r=>r.fecha.slice(0,7)===mes);
-  let gastos=S.gastos.filter(g=>g.fecha.slice(0,7)===mes);
-  if(trabId){regs=regs.filter(r=>r.trabajadorId===trabId);gastos=gastos.filter(g=>g.trabajadorId===trabId);}
+  let regs=_infModo==='mes'?S.registros.filter(r=>r.fecha.slice(0,7)===_infMes):S.registros.filter(r=>r.fecha.slice(0,4)===_infAno);
+  let gastos=_infModo==='mes'?S.gastos.filter(g=>g.fecha.slice(0,7)===_infMes):S.gastos.filter(g=>g.fecha.slice(0,4)===_infAno);
+  if(_infTrab){regs=regs.filter(r=>r.trabajadorId===_infTrab);gastos=gastos.filter(g=>g.trabajadorId===_infTrab);}
 
   const totalH=regs.reduce((a,r)=>a+(+r.horas||0),0);
   const totalG=gastos.reduce((a,g)=>a+(+g.importe||0),0);
@@ -1373,15 +1414,29 @@ function renderInforme(el,actions){
   const otMap={};
   regs.forEach(r=>{if(!otMap[r.proyId])otMap[r.proyId]={h:0,regs:[]};otMap[r.proyId].h+=+r.horas||0;otMap[r.proyId].regs.push(r);});
 
+  // Group by trabajador
+  const trabMap={};
+  regs.forEach(r=>{if(!trabMap[r.trabajadorId])trabMap[r.trabajadorId]={h:0};trabMap[r.trabajadorId].h+=+r.horas||0;});
+  gastos.forEach(g=>{if(!trabMap[g.trabajadorId])trabMap[g.trabajadorId]={h:0};trabMap[g.trabajadorId].g=(trabMap[g.trabajadorId].g||0)+(+g.importe||0);});
+
   el.innerHTML=`
   <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);">
     <div class="stat-card"><div class="stat-label">Total horas</div><div class="stat-value">${hFmt(totalH)}</div></div>
     <div class="stat-card"><div class="stat-label">Total gastos</div><div class="stat-value amber">${fmtMoneda(totalG)}</div></div>
     <div class="stat-card"><div class="stat-label">OTs trabajadas</div><div class="stat-value green">${Object.keys(otMap).length}</div></div>
   </div>
+  ${!_infTrab?`<div class="table-wrap" style="margin-bottom:16px;">
+    <table class="table">
+      <thead><tr><th>Trabajador</th><th>Horas</th><th>Gastos</th></tr></thead>
+      <tbody>${Object.entries(trabMap).sort((a,b)=>b[1].h-a[1].h).map(([id,data])=>{
+        const t=getTrab(id);
+        return`<tr><td>${esc(t?.nombre||'?')}</td><td class="font-bold">${hFmt(data.h)}</td><td class="amber font-bold">${fmtMoneda(data.g||0)}</td></tr>`;
+      }).join('')}</tbody>
+    </table>
+  </div>`:''}
   <div class="table-wrap">
     <table class="table">
-      <thead><tr><th>OT / Proyecto</th><th>Horas</th><th>% del mes</th></tr></thead>
+      <thead><tr><th>OT / Proyecto</th><th>Horas</th><th>% del periodo</th></tr></thead>
       <tbody>${Object.entries(otMap).sort((a,b)=>b[1].h-a[1].h).map(([id,data])=>{
         const ot=getOT(id);
         const pct=totalH>0?Math.round(data.h/totalH*100):0;
