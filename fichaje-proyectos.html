@@ -619,8 +619,11 @@ function findOrCrearProyecto(ref,cliente,color){
   if(ref){
     const existente=S.proyectos.find(p=>!_esOTsuelta(p)&&(p.ref||'').trim().toLowerCase()===ref.toLowerCase());
     if(existente){if(cliente&&!existente.cliente)existente.cliente=cliente;return existente;}
+  }else if(cliente){
+    const existente=S.proyectos.find(p=>!_esOTsuelta(p)&&!p.ref&&(p.cliente||'').trim().toLowerCase()===cliente.toLowerCase());
+    if(existente)return existente;
   }
-  const nuevo={id:ref?('p_'+ref.toLowerCase().replace(/[^a-z0-9]+/g,'_')):('p_'+uid()),nombre:ref||('Sin proyecto — '+(cliente||'Sin cliente')),ref:ref||'',cliente:cliente||'',color:color||'#5ab4f0',parentId:null,creado:new Date().toISOString()};
+  const nuevo={id:ref?('p_'+ref.toLowerCase().replace(/[^a-z0-9]+/g,'_')):('p_'+(cliente?cliente.toLowerCase().replace(/[^a-z0-9]+/g,'_'):uid())),nombre:ref||('Sin proyecto — '+(cliente||'Sin cliente')),ref:ref||'',cliente:cliente||'',color:color||'#5ab4f0',parentId:null,creado:new Date().toISOString()};
   S.proyectos.push(nuevo);
   return nuevo;
 }
@@ -628,9 +631,28 @@ function findOrCrearProyecto(ref,cliente,color){
 function attachOT(otRaw){
   const proy=findOrCrearProyecto(otRaw.ref,otRaw.cliente,otRaw.color);
   let ot=S.ots.find(x=>x.id===otRaw.id);
-  const datos={id:otRaw.id,proyectoId:proy.id,num:otRaw.num||'',descripcion:otRaw.descripcion||'',estado:otRaw.estado||'En proceso',fecha:otRaw.fecha||'',color:otRaw.color||proy.color,creado:otRaw.creado||new Date().toISOString()};
-  if(ot)Object.assign(ot,datos);else{ot=datos;S.ots.push(ot);}
+  if(ot){
+    // Ya existe localmente: solo actualizamos datos descriptivos.
+    // Nunca pisamos el estado (abierta/cerrada) ni la asignación de técnicos:
+    // eso lo gestiona el admin en TimeTrack, no debe resetearse en cada sincronización.
+    ot.proyectoId=proy.id;
+    ot.num=otRaw.num||ot.num||'';
+    if(otRaw.descripcion!==undefined)ot.descripcion=otRaw.descripcion;
+    ot.fecha=otRaw.fecha||ot.fecha||'';
+    ot.color=ot.color||otRaw.color||proy.color;
+  }else{
+    ot={id:otRaw.id,proyectoId:proy.id,num:otRaw.num||'',descripcion:otRaw.descripcion||'',estado:'Finalizado',asignadoA:[],fecha:otRaw.fecha||'',color:otRaw.color||proy.color,creado:otRaw.creado||new Date().toISOString()};
+    S.ots.push(ot);
+  }
   return ot;
+}
+
+// Da forma "de exportación" (con ref y cliente del Proyecto, no proyectoId interno) antes
+// de subir una OT a SharePoint, para que una relectura posterior (attachOT) no la deje
+// huérfana de Cliente/Proyecto.
+function _otParaSP(ot){
+  const p=S.proyectos.find(x=>x.id===ot.proyectoId);
+  return{id:ot.id,num:ot.num,ref:p?p.ref:'',cliente:p?p.cliente:'',descripcion:ot.descripcion||'',estado:ot.estado||'Finalizado',fecha:ot.fecha||'',color:ot.color||(p&&p.color)||'#888',asignadoA:ot.asignadoA||[],creado:ot.creado||new Date().toISOString()};
 }
 
 // Migración única: separa OTs que quedaron mezcladas dentro de S.proyectos
@@ -918,7 +940,7 @@ async function subirTodoASP(){
   const tok=await getToken();if(!tok){showSync('⚠ Sin token',false);return;}
   await Promise.all(Object.keys(SP.lists).map(l=>_cargarSpIds(l)));
   for(const p of S.proyectos)await spGuardar('proyectos',p);
-  for(const o of S.ots)await spGuardar('ots',o);
+  for(const o of S.ots)await spGuardar('ots',_otParaSP(o));
   for(const t of S.trabajadores)await spGuardar('trabajadores',t);
   for(const n of S.tiposTrabajo)await spGuardar('tipos',{id:'tipo_'+n.replace(/[^a-z0-9]/gi,'_').toLowerCase(),nombre:n});
   for(const r of S.registros)await spGuardar('registros',r);
@@ -1909,7 +1931,7 @@ async function guardarOT(){
         item=S.ots.find(x=>x.id===_editOTId);
         if(item)Object.assign(item,{proyectoId,num:ref,descripcion:nombre,color,estado,asignadoA});
       }else{
-        item={id:uid(),proyectoId,num:ref,descripcion:nombre,color,estado:'En proceso',asignadoA,creado:new Date().toISOString()};
+        item={id:uid(),proyectoId,num:ref,descripcion:nombre,color,estado:'Finalizado',asignadoA,creado:new Date().toISOString()};
         S.ots.push(item);
       }
     }else{
@@ -1924,7 +1946,7 @@ async function guardarOT(){
       }
     }
     save();closeModal('modal-ot');renderPage(currentPage);renderProyList();
-    if(item)await spGuardar(lista,item);
+    if(item)await spGuardar(lista,lista==='ots'?_otParaSP(item):item);
   }finally{
     _spSaveEnCurso=Math.max(0,_spSaveEnCurso-1);
     if(msalToken)setTimeout(()=>cargarDesdeSP(false).then(()=>{renderPage(currentPage);renderProyList();}),2000);
@@ -1941,7 +1963,7 @@ async function toggleEstadoOT(id){
   if(!confirm(`¿${accion.charAt(0).toUpperCase()+accion.slice(1)} esta OT?\n${nuevo==='Finalizado'?'Los técnicos no podrán fichar más horas.':'Los técnicos podrán volver a fichar horas.'}\n\nOT: ${ot.nombre}`))return;
   item.estado=nuevo;
   save();renderPage(currentPage);renderProyList();
-  await spGuardar(esOT?'ots':'proyectos',item);
+  await spGuardar(esOT?'ots':'proyectos',esOT?_otParaSP(item):item);
   showSync(nuevo==='Finalizado'?'🔒 OT cerrada':'🔓 OT reabierta',true);
 }
 
