@@ -983,9 +983,9 @@ function otsDe(proyId){return S.ots.filter(o=>o.proyectoId===proyId);}
 function _describirSeleccionable(o){
   if(o.proyectoId!==undefined){
     const p=S.proyectos.find(x=>x.id===o.proyectoId);
-    return{id:o.id,label:'OT '+o.num+(p&&p.cliente?' '+p.cliente:''),color:o.color||(p&&p.color)||'#888',_h:horasOT(o.id),estado:o.estado};
+    return{id:o.id,label:'OT '+o.num+(p&&p.cliente?' '+p.cliente:''),desc:o.descripcion||'',color:o.color||(p&&p.color)||'#888',_h:horasOT(o.id),estado:o.estado};
   }
-  return{id:o.id,label:(o.ref?o.ref+' ':'')+(o.nombre||''),color:o.color||'#888',_h:horasOT(o.id),estado:o.estado};
+  return{id:o.id,label:(o.ref?o.ref+' ':'')+(o.nombre||''),desc:'',color:o.color||'#888',_h:horasOT(o.id),estado:o.estado};
 }
 function itemsSeleccionables(incluirId){
   let base=S.ots.filter(o=>o.estado!=='Finalizado'&&o.estado!=='Cerrado');
@@ -1733,11 +1733,10 @@ function abrirModalHoras(id){
 
 function buildHorasCascade(){
   const el=document.getElementById('mh-cascade');
-  // Step 1: OT
   // Solo mostrar OTs/proyectos abiertos al trabajador
   let items=itemsSeleccionables(_mhOTId);
   const selOT=_mhOTId?getOT(_mhOTId):null;
-  const selTipo=_mhTipoTrabajo;
+  const selItem=_mhOTId?items.find(it=>it.id===_mhOTId):null;
 
   el.innerHTML=`
   <div class="cascade">
@@ -1750,36 +1749,25 @@ function buildHorasCascade(){
       <div class="cascade-body ${!_mhOTId?'open':''}">
         <div class="cascade-search"><input type="text" placeholder="Buscar OT..." oninput="filtrarOTCascade(this.value,'mh-ot-list')" id="mh-ot-search"></div>
         <div class="cascade-opts" id="mh-ot-list">
-          ${items.map(it=>`<div class="cascade-opt ${_mhOTId===it.id?'sel':''}" onclick="selOTHoras('${it.id}')">
-            <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;"></div>
-            <span style="flex:1;">${esc(it.label)}</span>
+          ${items.map(it=>`<div class="cascade-opt ${_mhOTId===it.id?'sel':''}" onclick="selOTHoras('${it.id}')" style="align-items:flex-start;">
+            <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;margin-top:3px;"></div>
+            <span style="flex:1;">${esc(it.label)}${it.desc?`<br><span class="text-xs text-muted">${esc(it.desc)}</span>`:''}</span>
             ${it._h?`<span class="text-xs text-muted">${hFmt(it._h)}</span>`:''}
           </div>`).join('')}
         </div>
       </div>
     </div>
-    <div class="cascade-step">
-      <div class="cascade-hdr" onclick="this.nextElementSibling.classList.toggle('open')">
-        <div class="cascade-num ${_mhTipoTrabajo?'done':''}">${_mhTipoTrabajo?'✓':'2'}</div>
-        <div class="cascade-label">Tipo de trabajo</div>
-        ${selTipo?`<div class="cascade-val">${esc(selTipo)}</div>`:''}
-      </div>
-      <div class="cascade-body ${_mhOTId&&!_mhTipoTrabajo?'open':''}">
-        <div class="cascade-opts">
-          ${S.tiposTrabajo.map(t=>`<div class="cascade-opt ${_mhTipoTrabajo===t?'sel':''}" onclick="selTipoHoras('${esc(t)}')">${esc(t)}</div>`).join('')}
-        </div>
-      </div>
-    </div>
+    ${selItem&&selItem.desc?`<div style="padding:10px 14px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--border);">${esc(selItem.desc)}</div>`:''}
   </div>`;
 }
 
 function filtrarOTCascade(v,listId){
   const filtro=v.toLowerCase();
   const items=itemsSeleccionables(_mhOTId)
-    .filter(it=>!filtro||it.label.toLowerCase().includes(filtro));
-  document.getElementById(listId).innerHTML=items.map(it=>`<div class="cascade-opt ${_mhOTId===it.id?'sel':''}" onclick="selOTHoras('${it.id}')">
-    <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;"></div>
-    <span style="flex:1;">${esc(it.label)}</span>
+    .filter(it=>!filtro||it.label.toLowerCase().includes(filtro)||(it.desc||'').toLowerCase().includes(filtro));
+  document.getElementById(listId).innerHTML=items.map(it=>`<div class="cascade-opt ${_mhOTId===it.id?'sel':''}" onclick="selOTHoras('${it.id}')" style="align-items:flex-start;">
+    <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;margin-top:3px;"></div>
+    <span style="flex:1;">${esc(it.label)}${it.desc?`<br><span class="text-xs text-muted">${esc(it.desc)}</span>`:''}</span>
     ${it._h?`<span class="text-xs text-muted">${hFmt(it._h)}</span>`:''}
   </div>`).join('');
 }
@@ -1789,7 +1777,6 @@ function selTipoHoras(t){_mhTipoTrabajo=t;buildHorasCascade();}
 
 function guardarHoras(){
   if(!_mhOTId)return alert('Selecciona una OT');
-  if(!_mhTipoTrabajo)return alert('Selecciona el tipo de trabajo');
   const horas=parseFloat(document.getElementById('mh-horas').value);
   if(!horas||horas<=0)return alert('Introduce las horas');
   const fecha=document.getElementById('mh-fecha').value;
@@ -1797,9 +1784,9 @@ function guardarHoras(){
   let reg;
   if(_editHorasId){
     reg=S.registros.find(x=>x.id===_editHorasId);
-    if(reg)Object.assign(reg,{proyId:_mhOTId,tipoTrabajo:_mhTipoTrabajo,horas,fecha,notas});
+    if(reg)Object.assign(reg,{proyId:_mhOTId,horas,fecha,notas});
   }else{
-    reg={id:uid(),trabajadorId:session.workerId||'admin',proyId:_mhOTId,tipoTrabajo:_mhTipoTrabajo,horas,fecha,notas};
+    reg={id:uid(),trabajadorId:session.workerId||'admin',proyId:_mhOTId,horas,fecha,notas};
     S.registros.push(reg);
   }
   save();closeModal('modal-horas');renderPage(currentPage);renderProyList();
