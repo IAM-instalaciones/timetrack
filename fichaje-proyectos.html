@@ -1240,8 +1240,22 @@ function renderOTsAdmin(el,actions){
       <option value="cerradas" ${_otsEstado==='cerradas'?'selected':''}>Cerradas</option>
     </select>
     <button class="btn btn-sm" onclick="importarOTsDesdeManifiesto()" style="background:#1d6f42;color:#fff;border-color:#1d6f42;">🔄 Sincronizar OTs del Manifiesto</button>
+    <button class="btn btn-sm btn-red" onclick="cerrarTodasLasOTs()">🔒 Cerrar todas las abiertas</button>
     <button class="btn btn-primary btn-sm" onclick="openModalOT()">+ Nueva OT/Proyecto</button>`;
   _renderOTsAdminTable(el,'');
+}
+
+async function cerrarTodasLasOTs(){
+  const abiertas=S.ots.filter(o=>o.estado!=='Finalizado'&&o.estado!=='Cerrado');
+  if(!abiertas.length)return alert('No hay OTs abiertas.');
+  if(!confirm(`Vas a cerrar ${abiertas.length} OT${abiertas.length>1?'s':''} que ${abiertas.length>1?'están':'está'} abierta${abiertas.length>1?'s':''}.\nLos técnicos dejarán de verlas en el desplegable de fichar hasta que las reabras una a una.\n\n¿Continuar?`))return;
+  abiertas.forEach(o=>o.estado='Finalizado');
+  save();renderPage(currentPage);renderProyList();
+  showSync('⟳ Cerrando '+abiertas.length+' OTs en SharePoint...',false);
+  for(const o of abiertas){
+    try{await spGuardar('ots',_otParaSP(o));}catch(e){console.warn('cerrarTodasLasOTs',o.id,e.message);}
+  }
+  showSync('✓ '+abiertas.length+' OTs cerradas',true);
 }
 function filtrarOTsAdmin(v){_renderOTsAdminTable(document.getElementById('main-content'),v);}
 function _ordenarOTsAdmin(campo){
