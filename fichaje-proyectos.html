@@ -918,7 +918,7 @@ async function importarOTsDesdeManifiesto(){
         num: ot.num,
         ref: opo ? (opo.referencia || '') : '',
         cliente: cli ? cli.nombre : '',
-        descripcion: ot.descripcion || '',
+        descripcion: (opo ? (opo.titulo || opo.referencia) : '') || ot.descripcion || '',
         estado: ot.estado || 'En proceso',
         fecha: ot.fecha || '',
         color: '#c0272d',
