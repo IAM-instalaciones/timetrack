@@ -226,12 +226,14 @@ select.form-input{cursor:pointer;}
 #sync-status.ok{background:#dcfce7;color:#166534;border:1px solid #86efac;}
 #sync-status.err{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
 /* ── Responsive sidebar ── */
-.sidebar-toggle{display:none;}
+.sidebar-toggle{display:none;position:relative;z-index:300;}
 @media(max-width:768px){
   .sidebar{position:fixed;left:-240px;top:0;bottom:0;z-index:200;transition:left .25s;box-shadow:none;}
   .sidebar.open{left:0;box-shadow:var(--shadow2);}
   .sidebar-toggle{display:flex;}
   .stat-grid{grid-template-columns:1fr 1fr;}
+  #sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:150;}
+  #sidebar-overlay.open{display:block;}
 }
 /* ── Scroll ── */
 ::-webkit-scrollbar{width:5px;height:5px;}
@@ -307,6 +309,7 @@ select.form-input{cursor:pointer;}
      APP SHELL
 ════════════════════════════════════════════ -->
 <div id="app" class="flex">
+  <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
   <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
@@ -631,17 +634,25 @@ function findOrCrearProyecto(ref,cliente,color){
 function attachOT(otRaw){
   const proy=findOrCrearProyecto(otRaw.ref,otRaw.cliente,otRaw.color);
   let ot=S.ots.find(x=>x.id===otRaw.id);
+  // Si el dato trae "asignadoA" es porque viene de nuestro propio export a SharePoint
+  // (_otParaSP) — es la fuente fiable de estado/asignación entre dispositivos.
+  // Si no lo trae, viene del Manifiesto (su "estado" es de facturación, no de fichaje).
+  const esExportTT=otRaw.asignadoA!==undefined;
   if(ot){
-    // Ya existe localmente: solo actualizamos datos descriptivos.
-    // Nunca pisamos el estado (abierta/cerrada) ni la asignación de técnicos:
-    // eso lo gestiona el admin en TimeTrack, no debe resetearse en cada sincronización.
     ot.proyectoId=proy.id;
     ot.num=otRaw.num||ot.num||'';
     if(otRaw.descripcion)ot.descripcion=otRaw.descripcion;
     ot.fecha=otRaw.fecha||ot.fecha||'';
     ot.color=ot.color||otRaw.color||proy.color;
+    if(esExportTT){
+      if(otRaw.estado)ot.estado=otRaw.estado;
+      ot.asignadoA=otRaw.asignadoA||[];
+    }
   }else{
-    ot={id:otRaw.id,proyectoId:proy.id,num:otRaw.num||'',descripcion:otRaw.descripcion||'',estado:'Finalizado',asignadoA:[],fecha:otRaw.fecha||'',color:otRaw.color||proy.color,creado:otRaw.creado||new Date().toISOString()};
+    ot={id:otRaw.id,proyectoId:proy.id,num:otRaw.num||'',descripcion:otRaw.descripcion||'',
+      estado:esExportTT?(otRaw.estado||'Finalizado'):'Finalizado',
+      asignadoA:esExportTT?(otRaw.asignadoA||[]):[],
+      fecha:otRaw.fecha||'',color:otRaw.color||proy.color,creado:otRaw.creado||new Date().toISOString()};
     S.ots.push(ot);
   }
   return ot;
@@ -1110,6 +1121,8 @@ function goPage(page,otId){
   // Active nav
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const nav=document.getElementById('nav-'+page);if(nav)nav.classList.add('active');
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
   renderPage(page);
   renderProyList();
 }
@@ -1171,7 +1184,10 @@ function renderProyList(){
   }).join('');
 }
 
-function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');}
+function toggleSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-overlay').classList.toggle('open');
+}
 
 // ════════════════════════════════════════════
 // DASHBOARD
