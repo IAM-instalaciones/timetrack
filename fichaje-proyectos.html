@@ -725,6 +725,23 @@ async function initMSAL(){
       cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}
     });
     if(msalInstance.initialize)await msalInstance.initialize();
+    // Si volvemos de un loginRedirect, procesamos aquí el resultado
+    try{
+      const redirectRes=await msalInstance.handleRedirectPromise();
+      if(redirectRes&&redirectRes.accessToken){
+        msalToken=redirectRes.accessToken;
+        showSync('\u27f3 Cargando datos...',false);
+        await Promise.all(Object.keys(SP.lists).map(l=>_cargarSpIds(l)));
+        await cargarDesdeSP(true);
+        renderLogin();
+        showSync('\u2713 Conectado con Microsoft 365',true);
+        return;
+      }
+    }catch(e){
+      console.error('handleRedirectPromise error',e);
+      const el=document.getElementById('ms-error');
+      if(el)el.textContent='Error: '+e.message;
+    }
     // Try silent token on load
     const accs=msalInstance.getAllAccounts();
     if(accs.length>0){
@@ -752,20 +769,8 @@ async function loginMicrosoft(){
   if(!msalInstance){alert('Error: MSAL no disponible');return;}
   document.getElementById('ms-error').textContent='';
   try{
-    let res;
-    try{res=await msalInstance.loginPopup({scopes:SP_SCOPES,prompt:'select_account'});}
-    catch(e){
-      if(String(e.errorCode||e.message||'').includes('interaction_in_progress')){
-        _limpiarMSAL();await new Promise(r=>setTimeout(r,300));
-        res=await msalInstance.loginPopup({scopes:SP_SCOPES,prompt:'select_account'});
-      }else throw e;
-    }
-    msalToken=res.accessToken;
-    showSync('⟳ Cargando datos...',false);
-    await Promise.all(Object.keys(SP.lists).map(l=>_cargarSpIds(l)));
-    await cargarDesdeSP(true);
-    renderLogin();
-    showSync('✓ Conectado con Microsoft 365',true);
+    await msalInstance.loginRedirect({scopes:SP_SCOPES,prompt:'select_account'});
+    // La página navega a Microsoft y vuelve; el resultado se procesa en initMSAL().
   }catch(e){
     console.error(e);
     if(e.errorCode!=='user_cancelled')
