@@ -637,7 +637,7 @@ function attachOT(otRaw){
     // eso lo gestiona el admin en TimeTrack, no debe resetearse en cada sincronización.
     ot.proyectoId=proy.id;
     ot.num=otRaw.num||ot.num||'';
-    if(otRaw.descripcion!==undefined)ot.descripcion=otRaw.descripcion;
+    if(otRaw.descripcion)ot.descripcion=otRaw.descripcion;
     ot.fecha=otRaw.fecha||ot.fecha||'';
     ot.color=ot.color||otRaw.color||proy.color;
   }else{
