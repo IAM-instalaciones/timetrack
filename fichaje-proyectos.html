@@ -419,10 +419,7 @@ select.form-input{cursor:pointer;}
     </div>
     <div class="form-group">
       <label class="form-label">Proyecto / OT</label>
-      <select class="form-input" id="mg-ot" onchange="_actualizarDescOTGasto()">
-        <option value="">Selecciona OT...</option>
-      </select>
-      <div id="mg-ot-desc" class="text-xs text-muted" style="margin-top:5px;"></div>
+      <div class="cascade" id="mg-ot-cascade"></div>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -688,6 +685,7 @@ let _editOTId = null;
 let _editTrabId = null;
 let _editTipoIdx = null;
 let _mhOTId = null;
+let _mgOTId = null;
 let _mhTipoTrabajo = null;
 let _projFiltro = '';
 let _spSaveEnCurso = 0;
@@ -1423,9 +1421,8 @@ function renderGastos(el,actions){
 function editGastoAdmin(id){
   const g=S.gastos.find(x=>x.id===id);if(!g)return;
   _editGastoId=id;
-  // Populate OT select
-  const sel=document.getElementById('mg-ot');
-  sel.innerHTML=`<option value="">Selecciona OT...</option>`+itemsSeleccionables(g.proyId).map(it=>`<option value="${it.id}" ${g.proyId===it.id?'selected':''}>${esc(it.label)}</option>`).join('');
+  _mgOTId=g.proyId||'';
+  buildGastoOTCascade();
   document.getElementById('mg-fecha').value=g.fecha||todayStr();
   document.getElementById('mg-tipo').value=g.tipo||'dieta';
   document.getElementById('mg-importe').value=g.importe||'';
@@ -1434,7 +1431,6 @@ function editGastoAdmin(id){
   document.getElementById('mg-motivo').value=g.motivo||'';
   document.getElementById('mg-title').textContent='Editar gasto';
   document.getElementById('mg-del-btn').style.display='inline-flex';
-  _actualizarDescOTGasto();
   openModal('modal-gasto');
 }
 
@@ -1832,12 +1828,8 @@ function deleteHoras(){
 function abrirModalGasto(id){
   _editGastoId=id||null;
   const g=id?S.gastos.find(x=>x.id===id):null;
-  // Populate OT select
-  const sel=document.getElementById('mg-ot');
-  const selOTId=g?.proyId||currentOTId||'';
-  sel.innerHTML=`<option value="">Selecciona OT...</option>`+itemsSeleccionables(selOTId).map(it=>
-    `<option value="${it.id}" ${selOTId===it.id?'selected':''}>${esc(it.label)} ${it._h?'('+hFmt(it._h)+')':''}</option>`
-  ).join('');
+  _mgOTId=g?.proyId||currentOTId||'';
+  buildGastoOTCascade();
   document.getElementById('mg-fecha').value=g?.fecha||_workerDate;
   document.getElementById('mg-tipo').value=g?.tipo||'dieta';
   document.getElementById('mg-importe').value=g?.importe||'';
@@ -1846,19 +1838,48 @@ function abrirModalGasto(id){
   document.getElementById('mg-motivo').value=g?.motivo||'';
   document.getElementById('mg-title').textContent=g?'Editar gasto':'Registrar gasto';
   document.getElementById('mg-del-btn').style.display=g?'inline-flex':'none';
-  _actualizarDescOTGasto();
   openModal('modal-gasto');
 }
 
-function _actualizarDescOTGasto(){
-  const id=document.getElementById('mg-ot').value;
-  const el=document.getElementById('mg-ot-desc');
-  const ot=id?getOT(id):null;
-  el.textContent=(ot&&ot.descripcion)?ot.descripcion:'';
+function buildGastoOTCascade(){
+  const el=document.getElementById('mg-ot-cascade');
+  const items=itemsSeleccionables(_mgOTId);
+  const selOT=_mgOTId?getOT(_mgOTId):null;
+  el.innerHTML=`
+    <div class="cascade-step">
+      <div class="cascade-hdr" onclick="this.nextElementSibling.classList.toggle('open')">
+        <div class="cascade-num ${_mgOTId?'done':''}">${_mgOTId?'✓':'1'}</div>
+        <div class="cascade-label">OT</div>
+        ${selOT?`<div class="cascade-val">${esc(selOT.nombre)}</div>`:''}
+      </div>
+      <div class="cascade-body ${!_mgOTId?'open':''}">
+        <div class="cascade-search"><input type="text" placeholder="Buscar OT..." oninput="filtrarOTGasto(this.value)" id="mg-ot-search"></div>
+        <div class="cascade-opts" id="mg-ot-list">
+          ${items.map(it=>`<div class="cascade-opt ${_mgOTId===it.id?'sel':''}" onclick="selOTGasto('${it.id}')" style="align-items:flex-start;">
+            <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;margin-top:3px;"></div>
+            <span style="flex:1;">${esc(it.label)}${it.desc?`<br><span class="text-xs text-muted">${esc(it.desc)}</span>`:''}</span>
+            ${it._h?`<span class="text-xs text-muted">${hFmt(it._h)}</span>`:''}
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function selOTGasto(id){_mgOTId=id;buildGastoOTCascade();}
+
+function filtrarOTGasto(v){
+  const filtro=v.toLowerCase();
+  const items=itemsSeleccionables(_mgOTId)
+    .filter(it=>!filtro||it.label.toLowerCase().includes(filtro)||(it.desc||'').toLowerCase().includes(filtro));
+  document.getElementById('mg-ot-list').innerHTML=items.map(it=>`<div class="cascade-opt ${_mgOTId===it.id?'sel':''}" onclick="selOTGasto('${it.id}')" style="align-items:flex-start;">
+    <div class="proj-dot" style="background:${it.color||'#888'};flex-shrink:0;margin-top:3px;"></div>
+    <span style="flex:1;">${esc(it.label)}${it.desc?`<br><span class="text-xs text-muted">${esc(it.desc)}</span>`:''}</span>
+    ${it._h?`<span class="text-xs text-muted">${hFmt(it._h)}</span>`:''}
+  </div>`).join('');
 }
 
 function guardarGasto(){
-  const otId=document.getElementById('mg-ot').value;
+  const otId=_mgOTId;
   if(!otId)return alert('Selecciona una OT');
   const importe=parseFloat(document.getElementById('mg-importe').value)||0;
   const gasto={
@@ -2122,73 +2143,88 @@ function generarExcelGastos(){
 
 function _buildExcel(gastos,mesLabel,nombTrab,mesStr){
   const wb=XLSX.utils.book_new();
-  const ws={};
   const TIPO_COL={gasolina:5,dieta:6,hotel:7,otros:8};
-  const DSTART=6,DEND=21;
+  const PORPAGINA=16;
+  const totalPaginas=Math.max(1,Math.ceil(gastos.length/PORPAGINA));
 
   function s(bold,sz,h,v2){return{font:{bold:!!bold,sz:sz||11,name:'Arial'},alignment:{horizontal:h||'left',vertical:v2||'center',wrapText:true}}}
   function sc(v,bold,sz,h){return{v:v??'',t:typeof v==='number'?'n':'s',s:s(bold,sz,h)};}
-  function mg(r1,c1,r2,c2){if(!ws['!merges'])ws['!merges']=[];ws['!merges'].push({s:{r:r1,c:c1},e:{r:r2,c:c2}});}
-  function W(r,c,cell){ws[XLSX.utils.encode_cell({r,c})]=cell;}
 
-  // Cabecera
-  mg(0,0,0,3);mg(0,4,0,10);
-  W(0,0,sc('IAM INSTALACIONES DE AUTOMATIZACIÓN',true,14,'center'));
-  W(0,4,{v:'HOJA DE GASTOS',t:'s',s:{font:{bold:true,sz:14,name:'Arial',color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:'C0272D'}},alignment:{horizontal:'center',vertical:'center'}}});
+  for(let pag=0;pag<totalPaginas;pag++){
+    const ws={};
+    function mg(r1,c1,r2,c2){if(!ws['!merges'])ws['!merges']=[];ws['!merges'].push({s:{r:r1,c:c1},e:{r:r2,c:c2}});}
+    function W(r,c,cell){ws[XLSX.utils.encode_cell({r,c})]=cell;}
+    const esUltima=pag===totalPaginas-1;
+    const gastosPagina=gastos.slice(pag*PORPAGINA,(pag+1)*PORPAGINA);
 
-  mg(2,0,2,1);mg(2,2,2,5);mg(2,6,2,7);mg(2,8,2,10);
-  W(2,0,sc('NOMBRE',true,11));W(2,2,sc(nombTrab,false,11));
-  const dias=new Date(parseInt(mesStr.slice(0,4)),parseInt(mesStr.slice(5,7)),0).getDate();
-  W(2,6,sc('PERÍODO',true,11));W(2,8,sc(`01/${mesStr.slice(5,7)}/${mesStr.slice(0,4)} - ${String(dias).padStart(2,'0')}/${mesStr.slice(5,7)}/${mesStr.slice(0,4)}`,false,11));
+    // Cabecera
+    mg(0,0,0,3);mg(0,4,0,10);
+    W(0,0,sc('IAM INSTALACIONES DE AUTOMATIZACIÓN',true,14,'center'));
+    W(0,4,{v:'HOJA DE GASTOS'+(totalPaginas>1?` (Pág. ${pag+1}/${totalPaginas})`:''),t:'s',s:{font:{bold:true,sz:14,name:'Arial',color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:'C0272D'}},alignment:{horizontal:'center',vertical:'center'}}});
 
-  mg(3,0,3,1);mg(3,2,3,5);mg(3,6,3,7);mg(3,8,3,10);
-  W(3,0,sc('MES',true,11));W(3,2,sc(mesLabel,true,11));
+    mg(2,0,2,1);mg(2,2,2,5);mg(2,6,2,7);mg(2,8,2,10);
+    W(2,0,sc('NOMBRE',true,11));W(2,2,sc(nombTrab,false,11));
+    const dias=new Date(parseInt(mesStr.slice(0,4)),parseInt(mesStr.slice(5,7)),0).getDate();
+    W(2,6,sc('PERÍODO',true,11));W(2,8,sc(`01/${mesStr.slice(5,7)}/${mesStr.slice(0,4)} - ${String(dias).padStart(2,'0')}/${mesStr.slice(5,7)}/${mesStr.slice(0,4)}`,false,11));
 
-  // Headers tabla
-  ['FECHA','PROYECTO','CLIENTE','MOTIVO','KM','GASOLINA','DIETAS','HOTEL','OTROS','TOTAL GASTOS','FORMA DE PAGO']
-    .forEach((h,i)=>W(5,i,sc(h,true,10,'center')));
+    mg(3,0,3,1);mg(3,2,3,5);mg(3,6,3,7);mg(3,8,3,10);
+    W(3,0,sc('MES',true,11));W(3,2,sc(mesLabel,true,11));
 
-  // Datos
-  for(let r=DSTART;r<=DEND;r++)W(r,9,{f:`SUM(F${r+1}:I${r+1})`,t:'n',s:s(false,11,'center')});
-  gastos.slice(0,16).forEach((g,i)=>{
-    const r=DSTART+i,f=g.fecha;
-    const ot=getOT(g.proyId);
-    W(r,0,sc(f?`${f.slice(8,10)}/${f.slice(5,7)}/${f.slice(0,4)}`:'' ,false,11));
-    W(r,1,sc(ot?.nombre||'—',false,11));
-    W(r,2,sc(ot?.cliente||'—',false,11));
-    W(r,3,sc(g.motivo||'—',false,11));
-    if(+g.km)W(r,4,{v:+g.km,t:'n',s:s(false,11,'center')});
-    const imp=+(+g.importe||0);
-    if(imp)W(r,TIPO_COL[g.tipo||'otros']||8,{v:imp,t:'n',s:s(false,11,'center')});
-    W(r,10,sc(g.formaPago||'Empresa',false,11));
-  });
+    // Headers tabla
+    ['FECHA','PROYECTO','CLIENTE','MOTIVO','KM','GASOLINA','DIETAS','HOTEL','OTROS','TOTAL GASTOS','FORMA DE PAGO']
+      .forEach((h,i)=>W(5,i,sc(h,true,10,'center')));
 
-  // Totales
-  const totalKm=gastos.slice(0,16).reduce((a,g)=>a+(+g.km||0),0);
-  const totalG=+gastos.slice(0,16).reduce((a,g)=>a+(+g.importe||0),0).toFixed(2);
-  const pagoTrab=+gastos.slice(0,16).filter(g=>g.formaPago==='Trabajador').reduce((a,g)=>a+(+g.importe||0),0).toFixed(2);
-  const pagoEmp=+gastos.slice(0,16).filter(g=>g.formaPago!=='Trabajador').reduce((a,g)=>a+(+g.importe||0),0).toFixed(2);
+    // Datos de esta página
+    const DSTART=6,DEND=DSTART+PORPAGINA-1;
+    for(let r=DSTART;r<=DEND;r++)W(r,9,{f:`SUM(F${r+1}:I${r+1})`,t:'n',s:s(false,11,'center')});
+    gastosPagina.forEach((g,i)=>{
+      const r=DSTART+i,f=g.fecha;
+      const ot=getOT(g.proyId);
+      W(r,0,sc(f?`${f.slice(8,10)}/${f.slice(5,7)}/${f.slice(0,4)}`:'' ,false,11));
+      W(r,1,sc(ot?.nombre||'—',false,11));
+      W(r,2,sc(ot?.cliente||'—',false,11));
+      W(r,3,sc(g.motivo||'—',false,11));
+      if(+g.km)W(r,4,{v:+g.km,t:'n',s:s(false,11,'center')});
+      const imp=+(+g.importe||0);
+      if(imp)W(r,TIPO_COL[g.tipo||'otros']||8,{v:imp,t:'n',s:s(false,11,'center')});
+      W(r,10,sc(g.formaPago||'Empresa',false,11));
+    });
 
-  mg(23,0,23,3);mg(23,6,23,8);
-  W(23,0,sc('TOTAL KM',true,11));W(23,4,{v:totalKm,t:'n',s:s(true,11,'center')});
-  W(23,6,sc('TOTAL GASTOS',true,11));W(23,9,{v:totalG,t:'n',s:s(true,11,'center')});
+    if(esUltima){
+      // Totales calculados sobre TODOS los gastos del mes (no solo esta página)
+      const totalKm=gastos.reduce((a,g)=>a+(+g.km||0),0);
+      const totalG=+gastos.reduce((a,g)=>a+(+g.importe||0),0).toFixed(2);
+      const pagoTrab=+gastos.filter(g=>g.formaPago==='Trabajador').reduce((a,g)=>a+(+g.importe||0),0).toFixed(2);
+      const pagoEmp=+gastos.filter(g=>g.formaPago!=='Trabajador').reduce((a,g)=>a+(+g.importe||0),0).toFixed(2);
 
-  mg(25,0,25,1);mg(25,2,25,5);mg(25,6,25,8);mg(25,9,25,10);
-  W(25,0,sc('PAGO TRABAJADOR',true,11));W(25,2,{v:pagoTrab,t:'n',s:s(false,11,'center')});
-  W(25,6,sc('TOTAL ADEUDADO',true,11));W(25,9,{v:pagoTrab,t:'n',s:s(false,11,'center')});
-  mg(26,0,26,1);mg(26,2,26,5);
-  W(26,0,sc('PAGO EMPRESA',true,11));W(26,2,{v:pagoEmp,t:'n',s:s(false,11,'center')});
+      mg(23,0,23,3);mg(23,6,23,8);
+      W(23,0,sc('TOTAL KM',true,11));W(23,4,{v:totalKm,t:'n',s:s(true,11,'center')});
+      W(23,6,sc('TOTAL GASTOS',true,11));W(23,9,{v:totalG,t:'n',s:s(true,11,'center')});
 
-  // Firmas
-  mg(28,0,28,3);mg(28,4,28,6);mg(28,7,28,10);
-  W(28,0,sc('FIRMA DEL SOLICITANTE',true,10,'center'));
-  W(28,4,sc('FIRMA DEL RESPONSABLE',true,10,'center'));
-  W(28,7,sc('CONFIRMACIÓN DE PAGO',true,10,'center'));
+      mg(25,0,25,1);mg(25,2,25,5);mg(25,6,25,8);mg(25,9,25,10);
+      W(25,0,sc('PAGO TRABAJADOR',true,11));W(25,2,{v:pagoTrab,t:'n',s:s(false,11,'center')});
+      W(25,6,sc('TOTAL ADEUDADO',true,11));W(25,9,{v:pagoTrab,t:'n',s:s(false,11,'center')});
+      mg(26,0,26,1);mg(26,2,26,5);
+      W(26,0,sc('PAGO EMPRESA',true,11));W(26,2,{v:pagoEmp,t:'n',s:s(false,11,'center')});
 
-  ws['!cols']=[{wch:10},{wch:14},{wch:14},{wch:16},{wch:7},{wch:9},{wch:9},{wch:9},{wch:9},{wch:12},{wch:14}];
-  ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:29,c:10}});
-  XLSX.utils.book_append_sheet(wb,ws,'Hoja de gastos');
-  XLSX.writeFile(wb,`HojaGastos_${nombTrab.replace(/\\s+/g,'_')}_${mesStr}.xlsx`);
+      // Firmas
+      mg(28,0,28,3);mg(28,4,28,6);mg(28,7,28,10);
+      W(28,0,sc('FIRMA DEL SOLICITANTE',true,10,'center'));
+      W(28,4,sc('FIRMA DEL RESPONSABLE',true,10,'center'));
+      W(28,7,sc('CONFIRMACIÓN DE PAGO',true,10,'center'));
+      ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:29,c:10}});
+    }else{
+      const notaFila=DEND+1;
+      mg(notaFila,0,notaFila,10);
+      W(notaFila,0,{v:'Continúa en la hoja siguiente...',t:'s',s:s(false,10,'center')});
+      ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:notaFila+1,c:10}});
+    }
+
+    ws['!cols']=[{wch:10},{wch:14},{wch:14},{wch:16},{wch:7},{wch:9},{wch:9},{wch:9},{wch:9},{wch:12},{wch:14}];
+    XLSX.utils.book_append_sheet(wb,ws,totalPaginas>1?`Hoja de gastos ${pag+1}`:'Hoja de gastos');
+  }
+
+  XLSX.writeFile(wb,`HojaGastos_${nombTrab.replace(/\s+/g,'_')}_${mesStr}.xlsx`);
 }
 
 // ════════════════════════════════════════════
