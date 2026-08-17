@@ -1691,9 +1691,10 @@ function renderOTDetail(el,actions,sub){
   const esCerrada=ot.estado==='Finalizado';
   actions.innerHTML=`
     <button class="btn btn-sm" onclick="openModalOT('${ot.id}')">✎ Editar</button>
-    <button class="btn btn-sm ${esCerrada?'btn-primary':'btn-red'}" onclick="toggleEstadoOT('${ot.id}')">${esCerrada?'🔓 Reabrir':'🔒 Cerrar OT'}</button>`;
+    <button class="btn btn-sm ${esCerrada?'btn-primary':'btn-red'}" onclick="toggleEstadoOT('${ot.id}')">${esCerrada?'🔓 Reabrir':'🔒 Cerrar OT'}</button>
+    <button class="btn btn-sm" onclick="currentOTId='${ot.id}';abrirModalGasto()">+ Gasto</button>`;
   const regs=S.registros.filter(r=>r.proyId===currentOTId).sort((a,b)=>b.fecha.localeCompare(a.fecha));
-  const gastos=S.gastos.filter(g=>g.proyId===currentOTId);
+  const gastos=S.gastos.filter(g=>g.proyId===currentOTId).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   const totalH=regs.reduce((a,r)=>a+(+r.horas||0),0);
   const totalG=gastos.reduce((a,g)=>a+(+g.importe||0),0);
   // Hours by tipo
@@ -1725,6 +1726,24 @@ function renderOTDetail(el,actions,sub){
           </tr>`;
         }).join('')}</tbody>
       </table></div>
+      <div class="flex items-center justify-between" style="margin:20px 0 12px;">
+        <div style="font-size:14px;font-weight:700;">Gastos</div>
+      </div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Fecha</th><th>Técnico</th><th>Tipo</th><th>Importe</th><th>Km</th><th>Motivo</th><th></th></tr></thead>
+        <tbody>${gastos.map(g=>{
+          const t=getTrab(g.trabajadorId);
+          return`<tr>
+            <td class="mono">${fmtDate(g.fecha)}</td>
+            <td>${esc(t?.nombre||'Empresa')}</td>
+            <td><span class="tipo-badge">${esc(g.tipo||'—')}</span></td>
+            <td class="font-bold amber">${fmtMoneda(g.importe)}</td>
+            <td>${g.km||0} km</td>
+            <td class="text-muted text-sm">${esc(g.motivo||'')}</td>
+            <td><button class="btn btn-sm btn-icon" onclick='editGastoAdmin("${g.id}")'>✎</button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>${gastos.length?'':'<div style="text-align:center;padding:16px;color:var(--muted);font-size:13px;">Sin gastos en esta OT todavía.</div>'}
     </div>
     <div style="width:200px;">
       <div style="font-size:14px;font-weight:700;margin-bottom:12px;">Por tipo de trabajo</div>
