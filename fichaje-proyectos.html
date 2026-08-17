@@ -449,6 +449,12 @@ select.form-input{cursor:pointer;}
         <input type="number" class="form-input" id="mg-km" min="0" placeholder="0">
       </div>
     </div>
+    <div class="form-group" id="mg-trab-group" style="display:none;">
+      <label class="form-label">Técnico</label>
+      <select class="form-input" id="mg-trabajador">
+        <option value="">Empresa (sin técnico — material, alquiler, etc.)</option>
+      </select>
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Forma de pago</label>
@@ -1037,7 +1043,10 @@ function itemsSeleccionables(incluirId){
   }
   return base.map(_describirSeleccionable).sort((a,b)=>b._h-a._h);
 }
-function getTrab(id){return S.trabajadores.find(x=>x.id===id);}
+function getTrab(id){
+  if(id==='empresa'||id==='admin')return{id,nombre:'Empresa',apellidos:'',cargo:''};
+  return S.trabajadores.find(x=>x.id===id);
+}
 function horasOT(otId){return S.registros.filter(r=>r.proyId===otId).reduce((a,r)=>a+(+r.horas||0),0);}
 
 function showSync(msg,ok){
@@ -1318,6 +1327,15 @@ function datosMargenes(filtro){
   return Object.values(grupos).map(g=>({...g,margenPct:g.facturadoBase>0?(g.margen/g.facturadoBase*100):null}));
 }
 
+let _margOrden='margen'; // 'label' | 'horas' | 'facturadoBase' | 'gastos' | 'costeHoras' | 'margen' | 'margenPct'
+let _margOrdenAsc=false;
+
+function _ordenarMargenes(campo){
+  if(_margOrden===campo)_margOrdenAsc=!_margOrdenAsc;else{_margOrden=campo;_margOrdenAsc=campo==='label';}
+  _renderMargenesTabla(document.getElementById('search-margenes')?.value||'');
+}
+function _flechaMarg(campo){return _margOrden===campo?(_margOrdenAsc?' ▲':' ▼'):'';}
+
 function renderMargenes(el,actions){
   actions.innerHTML=`
     <input type="text" placeholder="Buscar..." oninput="_renderMargenesTabla(this.value)" id="search-margenes" style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:200px;">
@@ -1333,7 +1351,12 @@ function renderMargenes(el,actions){
 function _renderMargenesTabla(filtro){
   const el=document.getElementById('main-content');
   let filas=datosMargenes(filtro);
-  filas.sort((a,b)=>b.margen-a.margen);
+  const dir=_margOrdenAsc?1:-1;
+  filas.sort((a,b)=>{
+    if(_margOrden==='label')return String(a.label).localeCompare(String(b.label),'es',{numeric:true})*dir;
+    const va=a[_margOrden]??-Infinity,vb=b[_margOrden]??-Infinity;
+    return (va-vb)*dir;
+  });
   const totF=filas.reduce((a,x)=>a+x.facturadoBase,0),totG=filas.reduce((a,x)=>a+x.gastos,0),
     totC=filas.reduce((a,x)=>a+x.costeHoras,0),totM=filas.reduce((a,x)=>a+x.margen,0);
   el.innerHTML=`
@@ -1344,18 +1367,32 @@ function _renderMargenesTabla(filtro){
     <div class="stat-card"><div class="stat-label">Margen</div><div class="stat-value" style="color:${totM>=0?'var(--green)':'var(--red)'}">${fmtMoneda(totM)}</div></div>
   </div>
   <div class="table-wrap"><table class="table">
-    <thead><tr><th>${_margAgrupar==='ot'?'OT':'Grupo'}</th>${_margAgrupar==='ot'?'<th>Cliente / Proyecto</th>':'<th>OTs</th>'}<th>Horas</th><th>Facturado</th><th>Gastos</th><th>Coste horas</th><th>Margen €</th><th>Margen %</th></tr></thead>
-    <tbody>${filas.map(x=>`<tr ${_margAgrupar==='ot'?`style="cursor:pointer;" onclick="goPage('ot','${x.key}')"`:''}>
-      <td class="font-bold">${esc(x.label)}</td>
+    <thead><tr>
+      <th style="cursor:pointer;" onclick="_ordenarMargenes('label')">${_margAgrupar==='ot'?'OT':'Grupo'}${_flechaMarg('label')}</th>
+      ${_margAgrupar==='ot'?'<th>Cliente / Proyecto</th>':'<th>OTs</th>'}
+      <th style="cursor:pointer;" onclick="_ordenarMargenes('horas')">Horas${_flechaMarg('horas')}</th>
+      <th style="cursor:pointer;" onclick="_ordenarMargenes('facturadoBase')">Facturado${_flechaMarg('facturadoBase')}</th>
+      <th style="cursor:pointer;" onclick="_ordenarMargenes('gastos')" title="Clic en una fila para añadir un gasto de empresa a esa OT">Gastos${_flechaMarg('gastos')}</th>
+      <th style="cursor:pointer;" onclick="_ordenarMargenes('costeHoras')">Coste horas${_flechaMarg('costeHoras')}</th>
+      <th style="cursor:pointer;" onclick="_ordenarMargenes('margen')">Margen €${_flechaMarg('margen')}</th>
+      <th style="cursor:pointer;" onclick="_ordenarMargenes('margenPct')">Margen %${_flechaMarg('margenPct')}</th>
+    </tr></thead>
+    <tbody>${filas.map(x=>`<tr>
+      <td class="font-bold" ${_margAgrupar==='ot'?`style="cursor:pointer;" onclick="goPage('ot','${x.key}')"`:''}>${esc(x.label)}</td>
       <td class="${_margAgrupar==='ot'?'text-muted text-sm':''}">${_margAgrupar==='ot'?esc(x.sub):x.n}</td>
       <td>${hFmt(x.horas)}</td>
       <td>${fmtMoneda(x.facturadoBase)}</td>
-      <td class="amber">${fmtMoneda(x.gastos)}</td>
+      <td class="amber" ${_margAgrupar==='ot'?`style="cursor:pointer;text-decoration:underline dotted;" onclick="abrirGastoEmpresaOT('${x.key}')" title="Añadir gasto de empresa a esta OT"`:''}>${fmtMoneda(x.gastos)}</td>
       <td class="amber">${fmtMoneda(x.costeHoras)}</td>
       <td class="font-bold" style="color:${x.margen>=0?'var(--green)':'var(--red)'}">${fmtMoneda(x.margen)}</td>
       <td style="color:${x.margen>=0?'var(--green)':'var(--red)'}">${x.margenPct===null?'—':x.margenPct.toFixed(1)+'%'}</td>
     </tr>`).join('')}</tbody>
   </table></div>${filas.length?'':'<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px;">Sin datos. Sincroniza las OTs del Manifiesto y añade el coste/hora de los trabajadores.</div>'}`;
+}
+
+function abrirGastoEmpresaOT(otId){
+  currentOTId=otId;
+  abrirModalGasto();
 }
 
 // ════════════════════════════════════════════
@@ -1528,19 +1565,7 @@ function renderGastos(el,actions){
 }
 
 function editGastoAdmin(id){
-  const g=S.gastos.find(x=>x.id===id);if(!g)return;
-  _editGastoId=id;
-  _mgOTId=g.proyId||'';
-  buildGastoOTCascade();
-  document.getElementById('mg-fecha').value=g.fecha||todayStr();
-  document.getElementById('mg-tipo').value=g.tipo||'dieta';
-  document.getElementById('mg-importe').value=g.importe||'';
-  document.getElementById('mg-km').value=g.km||'';
-  document.getElementById('mg-pago').value=g.formaPago||'Empresa';
-  document.getElementById('mg-motivo').value=g.motivo||'';
-  document.getElementById('mg-title').textContent='Editar gasto';
-  document.getElementById('mg-del-btn').style.display='inline-flex';
-  openModal('modal-gasto');
+  abrirModalGasto(id);
 }
 
 // ════════════════════════════════════════════
@@ -1948,6 +1973,16 @@ function abrirModalGasto(id){
   document.getElementById('mg-motivo').value=g?.motivo||'';
   document.getElementById('mg-title').textContent=g?'Editar gasto':'Registrar gasto';
   document.getElementById('mg-del-btn').style.display=g?'inline-flex':'none';
+  const trabGroup=document.getElementById('mg-trab-group');
+  if(session.role==='admin'){
+    trabGroup.style.display='';
+    const sel=document.getElementById('mg-trabajador');
+    sel.innerHTML=`<option value="">Empresa (sin técnico — material, alquiler, etc.)</option>`+
+      S.trabajadores.map(t=>`<option value="${t.id}">${esc(t.nombre)}</option>`).join('');
+    sel.value=g?(g.trabajadorId==='admin'?'':g.trabajadorId||''):'';
+  }else{
+    trabGroup.style.display='none';
+  }
   openModal('modal-gasto');
 }
 
@@ -1994,7 +2029,7 @@ function guardarGasto(){
   const importe=parseFloat(document.getElementById('mg-importe').value)||0;
   const gasto={
     id:_editGastoId||uid(),
-    trabajadorId:session.workerId||'admin',
+    trabajadorId:session.role==='admin'?(document.getElementById('mg-trabajador').value||'empresa'):(session.workerId||'admin'),
     proyId:otId,
     fecha:document.getElementById('mg-fecha').value,
     tipo:document.getElementById('mg-tipo').value,
