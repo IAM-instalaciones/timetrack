@@ -328,6 +328,9 @@ select.form-input{cursor:pointer;}
       <div class="nav-item" onclick="goPage('otsadmin')" id="nav-otsadmin">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>OTs
       </div>
+      <div class="nav-item" onclick="goPage('margenes')" id="nav-margenes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>Márgenes
+      </div>
       <div class="nav-item" onclick="goPage('fichajes')" id="nav-fichajes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>Fichajes
       </div>
@@ -540,6 +543,10 @@ select.form-input{cursor:pointer;}
     <div class="form-group">
       <label class="form-label">Cargo / Iniciales</label>
       <input type="text" class="form-input" id="mtrab-cargo">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Coste/hora (€) — para calcular márgenes, solo lo ve el admin</label>
+      <input type="number" step="0.01" min="0" class="form-input" id="mtrab-coste" placeholder="ej. 18.50">
     </div>
     <div class="modal-footer">
       <button class="btn btn-red btn-sm" id="mtrab-del-btn" onclick="deleteTrabajador()" style="display:none;margin-right:auto;">Eliminar</button>
@@ -925,11 +932,26 @@ async function importarOTsDesdeManifiesto(){
     const clientes = S2.clientes || [];
     const oportunidades = S2.oportunidades || [];
     const ordenes = S2.ordenes || [];
+    const facturas = S2.facturas || [];
+    function calcItemMini(it){
+      const base=(it.qty||0)*(it.precio||0);
+      const neto=base-base*(it.dto||0)/100;
+      return{neto,iva:neto*(it.iva||21)/100};
+    }
+    function facturadoDeOpo(opoId){
+      let base=0,total=0;
+      facturas.filter(f=>f.opoId===opoId).forEach(f=>{
+        (f.items||[]).filter(it=>it.precio!==undefined).forEach(it=>{
+          const c=calcItemMini(it);base+=c.neto;total+=c.neto+c.iva;
+        });
+      });
+      return{base,total};
+    }
     let ok = 0;
     ordenes.forEach(ot => {
       const opo = oportunidades.find(o => o.id === ot.opoId);
       const cli = opo ? clientes.find(c => c.id === opo.cliente) : null;
-      attachOT({
+      const otAttached = attachOT({
         id: 'ot_' + ot.id,
         num: ot.num,
         ref: opo ? (opo.referencia || '') : '',
@@ -940,6 +962,9 @@ async function importarOTsDesdeManifiesto(){
         color: '#c0272d',
         creado: ot.fecha || new Date().toISOString().slice(0, 10)
       });
+      otAttached.opoId = ot.opoId || '';
+      otAttached.familia = opo ? (opo.familia || '') : '';
+      otAttached.facturado = opo ? facturadoDeOpo(opo.id) : {base:0,total:0};
       ok++;
     });
     save();renderProyList();renderPage(currentPage);
@@ -1111,7 +1136,7 @@ function logout(){
 // ════════════════════════════════════════════
 // NAVEGACIÓN
 // ════════════════════════════════════════════
-const PAGE_TITLES={dashboard:'Dashboard',otsadmin:'OTs',fichajes:'Fichajes',gastos:'Gastos',
+const PAGE_TITLES={dashboard:'Dashboard',otsadmin:'OTs',margenes:'Márgenes',fichajes:'Fichajes',gastos:'Gastos',
   trabajadores:'Trabajadores',tipos:'Tipos de trabajo',informe:'Informe',
   hoy:'Registro diario',calendario:'Calendario',ot:''};
 
@@ -1136,6 +1161,7 @@ function renderPage(page){
   title.textContent=PAGE_TITLES[page]||'';
   if(page==='dashboard')renderDashboard(content,actions);
   else if(page==='otsadmin')renderOTsAdmin(content,actions);
+  else if(page==='margenes')renderMargenes(content,actions);
   else if(page==='fichajes')renderFichajes(content,actions);
   else if(page==='gastos')renderGastos(content,actions);
   else if(page==='trabajadores')renderTrabajadores(content,actions);
@@ -1247,6 +1273,89 @@ function renderDashboard(el,actions){
       }).join(''):`<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px;">Sin datos esta semana</div>`}
     </div>
   </div>`;
+}
+
+// ════════════════════════════════════════════
+// MÁRGENES (ADMIN) — facturado vs. gastos + coste de horas, por OT
+// ════════════════════════════════════════════
+let _margAgrupar='ot'; // 'ot' | 'cliente' | 'proyecto' | 'familia'
+
+function _margenOT(ot){
+  const gastos=S.gastos.filter(g=>g.proyId===ot.id).reduce((a,g)=>a+(+g.importe||0),0);
+  const regs=S.registros.filter(r=>r.proyId===ot.id);
+  const horas=regs.reduce((a,r)=>a+(+r.horas||0),0);
+  const costeHoras=regs.reduce((a,r)=>{const t=getTrab(r.trabajadorId);return a+(+r.horas||0)*(t&&t.costeHora?+t.costeHora:0);},0);
+  const facturadoBase=(ot.facturado&&ot.facturado.base)||0;
+  const margen=facturadoBase-gastos-costeHoras;
+  return{facturadoBase,gastos,costeHoras,horas,margen,margenPct:facturadoBase>0?(margen/facturadoBase*100):null};
+}
+
+function datosMargenes(filtro){
+  const f=(filtro||'').toLowerCase();
+  const ots=S.ots.filter(o=>{
+    if(!f)return true;
+    const p=S.proyectos.find(x=>x.id===o.proyectoId);
+    return String(o.num).toLowerCase().includes(f)||(p?.cliente||'').toLowerCase().includes(f)||(p?.ref||'').toLowerCase().includes(f)||(o.familia||'').toLowerCase().includes(f)||(o.descripcion||'').toLowerCase().includes(f);
+  });
+  if(_margAgrupar==='ot'){
+    return ots.map(o=>{
+      const p=S.proyectos.find(x=>x.id===o.proyectoId);
+      const m=_margenOT(o);
+      return{key:o.id,label:'OT '+o.num,sub:(p?.cliente||'')+(p?.ref?' · '+p.ref:''),n:1,...m};
+    });
+  }
+  const keyFn = _margAgrupar==='cliente'?(o=>{const p=S.proyectos.find(x=>x.id===o.proyectoId);return p?.cliente||'Sin cliente';})
+    : _margAgrupar==='proyecto'?(o=>{const p=S.proyectos.find(x=>x.id===o.proyectoId);return(p?.ref?p.ref+' — ':'')+(p?.cliente||'Sin cliente');})
+    : (o=>o.familia||'Sin clasificar');
+  const grupos={};
+  ots.forEach(o=>{
+    const k=keyFn(o);
+    if(!grupos[k])grupos[k]={key:k,label:k,facturadoBase:0,gastos:0,costeHoras:0,horas:0,margen:0,n:0};
+    const m=_margenOT(o);
+    grupos[k].facturadoBase+=m.facturadoBase;grupos[k].gastos+=m.gastos;
+    grupos[k].costeHoras+=m.costeHoras;grupos[k].horas+=m.horas;grupos[k].margen+=m.margen;grupos[k].n++;
+  });
+  return Object.values(grupos).map(g=>({...g,margenPct:g.facturadoBase>0?(g.margen/g.facturadoBase*100):null}));
+}
+
+function renderMargenes(el,actions){
+  actions.innerHTML=`
+    <input type="text" placeholder="Buscar..." oninput="_renderMargenesTabla(this.value)" id="search-margenes" style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:200px;">
+    <select onchange="_margAgrupar=this.value;_renderMargenesTabla(document.getElementById('search-margenes').value)" class="form-input" style="width:150px;padding:6px 10px;font-size:13px;">
+      <option value="ot">Por OT</option>
+      <option value="cliente">Por cliente</option>
+      <option value="proyecto">Por proyecto</option>
+      <option value="familia">Por tipo de trabajo</option>
+    </select>`;
+  _renderMargenesTabla('');
+}
+
+function _renderMargenesTabla(filtro){
+  const el=document.getElementById('main-content');
+  let filas=datosMargenes(filtro);
+  filas.sort((a,b)=>b.margen-a.margen);
+  const totF=filas.reduce((a,x)=>a+x.facturadoBase,0),totG=filas.reduce((a,x)=>a+x.gastos,0),
+    totC=filas.reduce((a,x)=>a+x.costeHoras,0),totM=filas.reduce((a,x)=>a+x.margen,0);
+  el.innerHTML=`
+  <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
+    <div class="stat-card"><div class="stat-label">Facturado (base)</div><div class="stat-value">${fmtMoneda(totF)}</div></div>
+    <div class="stat-card"><div class="stat-label">Gastos</div><div class="stat-value amber">${fmtMoneda(totG)}</div></div>
+    <div class="stat-card"><div class="stat-label">Coste horas</div><div class="stat-value amber">${fmtMoneda(totC)}</div></div>
+    <div class="stat-card"><div class="stat-label">Margen</div><div class="stat-value" style="color:${totM>=0?'var(--green)':'var(--red)'}">${fmtMoneda(totM)}</div></div>
+  </div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>${_margAgrupar==='ot'?'OT':'Grupo'}</th>${_margAgrupar==='ot'?'<th>Cliente / Proyecto</th>':'<th>OTs</th>'}<th>Horas</th><th>Facturado</th><th>Gastos</th><th>Coste horas</th><th>Margen €</th><th>Margen %</th></tr></thead>
+    <tbody>${filas.map(x=>`<tr ${_margAgrupar==='ot'?`style="cursor:pointer;" onclick="goPage('ot','${x.key}')"`:''}>
+      <td class="font-bold">${esc(x.label)}</td>
+      <td class="${_margAgrupar==='ot'?'text-muted text-sm':''}">${_margAgrupar==='ot'?esc(x.sub):x.n}</td>
+      <td>${hFmt(x.horas)}</td>
+      <td>${fmtMoneda(x.facturadoBase)}</td>
+      <td class="amber">${fmtMoneda(x.gastos)}</td>
+      <td class="amber">${fmtMoneda(x.costeHoras)}</td>
+      <td class="font-bold" style="color:${x.margen>=0?'var(--green)':'var(--red)'}">${fmtMoneda(x.margen)}</td>
+      <td style="color:${x.margen>=0?'var(--green)':'var(--red)'}">${x.margenPct===null?'—':x.margenPct.toFixed(1)+'%'}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>${filas.length?'':'<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px;">Sin datos. Sincroniza las OTs del Manifiesto y añade el coste/hora de los trabajadores.</div>'}`;
 }
 
 // ════════════════════════════════════════════
@@ -1441,7 +1550,7 @@ function renderTrabajadores(el,actions){
   actions.innerHTML=`<button class="btn btn-primary btn-sm" onclick="openModalTrab()">+ Trabajador</button>
     <button class="btn btn-sm" onclick="openModal('modal-pin')">🔑 Cambiar PIN</button>`;
   el.innerHTML=`<div class="table-wrap"><table class="table">
-    <thead><tr><th>Nombre</th><th>Apellidos</th><th>Cargo</th><th>Registros</th><th>Horas total</th><th></th></tr></thead>
+    <thead><tr><th>Nombre</th><th>Apellidos</th><th>Cargo</th><th>Coste/h</th><th>Registros</th><th>Horas total</th><th></th></tr></thead>
     <tbody>${S.trabajadores.map(t=>{
       const regs=S.registros.filter(r=>r.trabajadorId===t.id);
       const horas=regs.reduce((a,r)=>a+(+r.horas||0),0);
@@ -1449,6 +1558,7 @@ function renderTrabajadores(el,actions){
         <td class="font-medium">${esc(t.nombre)}</td>
         <td>${esc(t.apellidos||'')}</td>
         <td class="text-muted">${esc(t.cargo||'')}</td>
+        <td class="text-muted">${t.costeHora?fmtMoneda(t.costeHora)+'/h':'—'}</td>
         <td class="text-muted">${regs.length}</td>
         <td class="font-bold">${hFmt(horas)}</td>
         <td><button class="btn btn-sm btn-icon" onclick='openModalTrab("${t.id}")'>✎</button></td>
@@ -2043,6 +2153,7 @@ function openModalTrab(id){
   document.getElementById('mtrab-nombre').value=t?.nombre||'';
   document.getElementById('mtrab-apellidos').value=t?.apellidos||'';
   document.getElementById('mtrab-cargo').value=t?.cargo||'';
+  document.getElementById('mtrab-coste').value=t?.costeHora||'';
   document.getElementById('mtrab-del-btn').style.display=t?'inline-flex':'none';
   openModal('modal-trab');
 }
@@ -2050,12 +2161,13 @@ function openModalTrab(id){
 function guardarTrabajador(){
   const nombre=document.getElementById('mtrab-nombre').value.trim();
   if(!nombre)return alert('Nombre obligatorio');
+  const costeHora=parseFloat(document.getElementById('mtrab-coste').value)||0;
   let t;
   if(_editTrabId){
     t=S.trabajadores.find(x=>x.id===_editTrabId);
-    if(t)Object.assign(t,{nombre,apellidos:document.getElementById('mtrab-apellidos').value.trim(),cargo:document.getElementById('mtrab-cargo').value.trim()});
+    if(t)Object.assign(t,{nombre,apellidos:document.getElementById('mtrab-apellidos').value.trim(),cargo:document.getElementById('mtrab-cargo').value.trim(),costeHora});
   }else{
-    t={id:uid(),nombre,apellidos:document.getElementById('mtrab-apellidos').value.trim(),cargo:document.getElementById('mtrab-cargo').value.trim()};
+    t={id:uid(),nombre,apellidos:document.getElementById('mtrab-apellidos').value.trim(),cargo:document.getElementById('mtrab-cargo').value.trim(),costeHora};
     S.trabajadores.push(t);
   }
   save();closeModal('modal-trab');renderPage(currentPage);
