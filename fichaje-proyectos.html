@@ -419,9 +419,10 @@ select.form-input{cursor:pointer;}
     </div>
     <div class="form-group">
       <label class="form-label">Proyecto / OT</label>
-      <select class="form-input" id="mg-ot">
+      <select class="form-input" id="mg-ot" onchange="_actualizarDescOTGasto()">
         <option value="">Selecciona OT...</option>
       </select>
+      <div id="mg-ot-desc" class="text-xs text-muted" style="margin-top:5px;"></div>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -1433,6 +1434,7 @@ function editGastoAdmin(id){
   document.getElementById('mg-motivo').value=g.motivo||'';
   document.getElementById('mg-title').textContent='Editar gasto';
   document.getElementById('mg-del-btn').style.display='inline-flex';
+  _actualizarDescOTGasto();
   openModal('modal-gasto');
 }
 
@@ -1844,7 +1846,15 @@ function abrirModalGasto(id){
   document.getElementById('mg-motivo').value=g?.motivo||'';
   document.getElementById('mg-title').textContent=g?'Editar gasto':'Registrar gasto';
   document.getElementById('mg-del-btn').style.display=g?'inline-flex':'none';
+  _actualizarDescOTGasto();
   openModal('modal-gasto');
+}
+
+function _actualizarDescOTGasto(){
+  const id=document.getElementById('mg-ot').value;
+  const el=document.getElementById('mg-ot-desc');
+  const ot=id?getOT(id):null;
+  el.textContent=(ot&&ot.descripcion)?ot.descripcion:'';
 }
 
 function guardarGasto(){
