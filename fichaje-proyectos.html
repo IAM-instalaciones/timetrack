@@ -1302,11 +1302,14 @@ function _margenOT(ot){
   return{facturadoBase,gastos,costeHoras,horas,margen,margenPct:facturadoBase>0?(margen/facturadoBase*100):null};
 }
 
+let _margCliente='';
+
 function datosMargenes(filtro){
   const f=(filtro||'').toLowerCase();
   const ots=S.ots.filter(o=>{
-    if(!f)return true;
     const p=S.proyectos.find(x=>x.id===o.proyectoId);
+    if(_margCliente&&(p?.cliente||'')!==_margCliente)return false;
+    if(!f)return true;
     return String(o.num).toLowerCase().includes(f)||(p?.cliente||'').toLowerCase().includes(f)||(p?.ref||'').toLowerCase().includes(f)||(o.familia||'').toLowerCase().includes(f)||(o.descripcion||'').toLowerCase().includes(f);
   });
   if(_margAgrupar==='ot'){
@@ -1340,8 +1343,13 @@ function _ordenarMargenes(campo){
 function _flechaMarg(campo){return _margOrden===campo?(_margOrdenAsc?' ▲':' ▼'):'';}
 
 function renderMargenes(el,actions){
+  const clientes=[...new Set(S.proyectos.map(p=>p.cliente).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   actions.innerHTML=`
     <input type="text" placeholder="Buscar..." oninput="_renderMargenesTabla(this.value)" id="search-margenes" style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:200px;">
+    <select onchange="_margCliente=this.value;_renderMargenesTabla(document.getElementById('search-margenes').value)" class="form-input" style="width:170px;padding:6px 10px;font-size:13px;">
+      <option value="">Todos los clientes</option>
+      ${clientes.map(c=>`<option value="${esc(c)}" ${_margCliente===c?'selected':''}>${esc(c)}</option>`).join('')}
+    </select>
     <select onchange="_margAgrupar=this.value;_renderMargenesTabla(document.getElementById('search-margenes').value)" class="form-input" style="width:150px;padding:6px 10px;font-size:13px;">
       <option value="ot">Por OT</option>
       <option value="cliente">Por cliente</option>
