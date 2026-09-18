@@ -827,7 +827,7 @@ async function spFetch(url,opts={}){
 
 async function _cargarSpIds(list){
   try{
-    const res=await spFetch(spUrl(list)+'?$top=5000&$select=Id,Title');
+    const res=await spFetch(spUrl(list)+'?$top=5000&$select=Id,Title&$orderby=Id');
     res.value.forEach(i=>{_spIds[list+'_'+i.Title]=i.Id;});
   }catch(e){
     // TT_OTs might not exist yet - not critical
@@ -872,18 +872,21 @@ async function cargarDesdeSP(mostrarMsg=true){
   if(mostrarMsg)showSync('⟳ Sincronizando...',false);
   try{
     const [proy,ots,trabs,tipos,regs,gastos,cfgs]=await Promise.all([
-      spFetch(spUrl('proyectos')+'?$top=2000&$select=Title,SPData'),
-      spFetch(spUrl('ots')+'?$top=2000&$select=Title,SPData').catch(()=>({value:[]})),
-      spFetch(spUrl('trabajadores')+'?$top=500&$select=Title,SPData'),
+      spFetch(spUrl('proyectos')+'?$top=2000&$select=Title,SPData&$orderby=Id'),
+      spFetch(spUrl('ots')+'?$top=2000&$select=Title,SPData&$orderby=Id').catch(()=>({value:[]})),
+      spFetch(spUrl('trabajadores')+'?$top=500&$select=Title,SPData&$orderby=Id'),
       spFetch(spUrl('tipos')+'?$top=500&$select=Title,SPData'),
-      spFetch(spUrl('registros')+'?$top=10000&$select=Title,SPData'),
-      spFetch(spUrl('gastos')+'?$top=10000&$select=Title,SPData'),
+      spFetch(spUrl('registros')+'?$top=10000&$select=Title,SPData&$orderby=Id'),
+      spFetch(spUrl('gastos')+'?$top=10000&$select=Title,SPData&$orderby=Id'),
       spFetch(spUrl('config')+'?$top=10&$select=Title,SPData'),
     ]);
     function parse(arr,lista){
-      const seen=new Set();
-      const spItems=_filtrarTumbas(lista,arr.value.map(i=>{try{return JSON.parse(i.SPData);}catch{return null;}}).filter(x=>x&&x.id&&!seen.has(x.id)&&seen.add(x.id)));
-      return spItems;
+      // Si hay filas duplicadas para un mismo id (residuo de bugs de sincronización
+      // antiguos), nos quedamos con la ÚLTIMA — es la más probable de ser la reciente,
+      // ya que _cargarSpIds también apunta siempre a la última coincidencia.
+      const map={};
+      arr.value.forEach(i=>{try{const o=JSON.parse(i.SPData);if(o&&o.id)map[o.id]=o;}catch(e){}});
+      return _filtrarTumbas(lista,Object.values(map));
     }
     function merge(local,spItems){
       const spIds=new Set(spItems.map(x=>x.id));
@@ -896,7 +899,7 @@ async function cargarDesdeSP(mostrarMsg=true){
       const otsFromGestion=parse(ots,'ots');
       otsFromGestion.forEach(o=>attachOT(o));
     }
-    if(trabs.value.length)S.trabajadores=parse(trabs,'trabajadores');
+    if(trabs.value.length)S.trabajadores=merge(S.trabajadores,parse(trabs,'trabajadores'));
     if(tipos.value.length)S.tiposTrabajo=parse(tipos,'tipos').map(x=>x.nombre||x);
     if(regs.value.length)S.registros=merge(S.registros,parse(regs,'registros'));
     if(gastos.value.length)S.gastos=merge(S.gastos,parse(gastos,'gastos'));
@@ -2212,7 +2215,7 @@ function openModalTrab(id){
   openModal('modal-trab');
 }
 
-function guardarTrabajador(){
+async function guardarTrabajador(){
   const nombre=document.getElementById('mtrab-nombre').value.trim();
   if(!nombre)return alert('Nombre obligatorio');
   const costeHora=parseFloat(document.getElementById('mtrab-coste').value)||0;
@@ -2225,7 +2228,14 @@ function guardarTrabajador(){
     S.trabajadores.push(t);
   }
   save();closeModal('modal-trab');renderPage(currentPage);
-  if(t)spGuardar('trabajadores',t);
+  if(t&&msalToken){
+    showSync('⟳ Guardando en SharePoint...',false);
+    // Refrescamos el mapeo de IDs por si este trabajador se creó antes de que
+    // existiera este campo — evita crear una fila duplicada sin coste/hora.
+    if(!_spIds['trabajadores_'+t.id])await _cargarSpIds('trabajadores');
+    await spGuardar('trabajadores',t);
+    showSync('✓ Guardado',true);
+  }
 }
 
 function deleteTrabajador(){
