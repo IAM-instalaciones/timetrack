@@ -1303,12 +1303,14 @@ function _margenOT(ot){
 }
 
 let _margCliente='';
+let _margProyecto='';
 
 function datosMargenes(filtro){
   const f=(filtro||'').toLowerCase();
   const ots=S.ots.filter(o=>{
     const p=S.proyectos.find(x=>x.id===o.proyectoId);
     if(_margCliente&&(p?.cliente||'')!==_margCliente)return false;
+    if(_margProyecto&&(p?.ref||'')!==_margProyecto)return false;
     if(!f)return true;
     return String(o.num).toLowerCase().includes(f)||(p?.cliente||'').toLowerCase().includes(f)||(p?.ref||'').toLowerCase().includes(f)||(o.familia||'').toLowerCase().includes(f)||(o.descripcion||'').toLowerCase().includes(f);
   });
@@ -1344,11 +1346,17 @@ function _flechaMarg(campo){return _margOrden===campo?(_margOrdenAsc?' â–²':' â–
 
 function renderMargenes(el,actions){
   const clientes=[...new Set(S.proyectos.map(p=>p.cliente).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  const proyectos=[...new Set(S.proyectos.filter(p=>!_margCliente||p.cliente===_margCliente).map(p=>p.ref).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{numeric:true}));
+  if(_margProyecto&&!proyectos.includes(_margProyecto))_margProyecto='';
   actions.innerHTML=`
     <input type="text" placeholder="Buscar..." oninput="_renderMargenesTabla(this.value)" id="search-margenes" style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:200px;">
-    <select onchange="_margCliente=this.value;_renderMargenesTabla(document.getElementById('search-margenes').value)" class="form-input" style="width:170px;padding:6px 10px;font-size:13px;">
+    <select onchange="_margCliente=this.value;renderMargenes(document.getElementById('main-content'),document.getElementById('topbar-actions'))" class="form-input" style="width:170px;padding:6px 10px;font-size:13px;">
       <option value="">Todos los clientes</option>
       ${clientes.map(c=>`<option value="${esc(c)}" ${_margCliente===c?'selected':''}>${esc(c)}</option>`).join('')}
+    </select>
+    <select onchange="_margProyecto=this.value;_renderMargenesTabla(document.getElementById('search-margenes').value)" class="form-input" style="width:150px;padding:6px 10px;font-size:13px;">
+      <option value="">Todos los proyectos</option>
+      ${proyectos.map(r=>`<option value="${esc(r)}" ${_margProyecto===r?'selected':''}>${esc(r)}</option>`).join('')}
     </select>
     <select onchange="_margAgrupar=this.value;_renderMargenesTabla(document.getElementById('search-margenes').value)" class="form-input" style="width:150px;padding:6px 10px;font-size:13px;">
       <option value="ot">Por OT</option>
