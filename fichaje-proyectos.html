@@ -1359,16 +1359,17 @@ function renderMargenes(el,actions){
       ${proyectos.map(r=>`<option value="${esc(r)}" ${_margProyecto===r?'selected':''}>${esc(r)}</option>`).join('')}
     </select>
     <select onchange="_margAgrupar=this.value;_renderMargenesTabla(document.getElementById('search-margenes').value)" class="form-input" style="width:150px;padding:6px 10px;font-size:13px;">
-      <option value="ot">Por OT</option>
-      <option value="cliente">Por cliente</option>
-      <option value="proyecto">Por proyecto</option>
-      <option value="familia">Por tipo de trabajo</option>
-    </select>`;
+      <option value="ot" ${_margAgrupar==='ot'?'selected':''}>Por OT</option>
+      <option value="cliente" ${_margAgrupar==='cliente'?'selected':''}>Por cliente</option>
+      <option value="proyecto" ${_margAgrupar==='proyecto'?'selected':''}>Por proyecto</option>
+      <option value="familia" ${_margAgrupar==='familia'?'selected':''}>Por tipo de trabajo</option>
+    </select>
+    <button class="btn btn-sm" onclick="exportarMargenesExcel()" style="padding:6px 10px;font-size:13px;">⬇ Excel</button>
+    <button class="btn btn-sm" onclick="exportarMargenesPDF()" style="padding:6px 10px;font-size:13px;">🖨 PDF</button>`;
   _renderMargenesTabla('');
 }
 
-function _renderMargenesTabla(filtro){
-  const el=document.getElementById('main-content');
+function _margFilasTot(filtro){
   let filas=datosMargenes(filtro);
   const dir=_margOrdenAsc?1:-1;
   filas.sort((a,b)=>{
@@ -1376,14 +1377,69 @@ function _renderMargenesTabla(filtro){
     const va=a[_margOrden]??-Infinity,vb=b[_margOrden]??-Infinity;
     return (va-vb)*dir;
   });
-  const totF=filas.reduce((a,x)=>a+x.facturadoBase,0),totG=filas.reduce((a,x)=>a+x.gastos,0),
-    totC=filas.reduce((a,x)=>a+x.costeHoras,0),totM=filas.reduce((a,x)=>a+x.margen,0);
+  const tot={F:filas.reduce((a,x)=>a+x.facturadoBase,0),G:filas.reduce((a,x)=>a+x.gastos,0),
+    C:filas.reduce((a,x)=>a+x.costeHoras,0),M:filas.reduce((a,x)=>a+x.margen,0),H:filas.reduce((a,x)=>a+x.horas,0),N:filas.reduce((a,x)=>a+x.n,0)};
+  tot.P=tot.F>0?tot.M/tot.F*100:null;
+  return{filas,tot};
+}
+function _margDescFiltros(){
+  const t=document.getElementById('search-margenes')?.value||'';
+  const ag={ot:'Por OT',cliente:'Por cliente',proyecto:'Por proyecto',familia:'Por tipo de trabajo'}[_margAgrupar];
+  return [ag,_margCliente?'Cliente: '+_margCliente:'Todos los clientes',_margProyecto?'Proyecto: '+_margProyecto:'Todos los proyectos',t?'Búsqueda: "'+t+'"':''].filter(Boolean);
+}
+function _margCols(){return[_margAgrupar==='ot'?'OT':'Grupo',_margAgrupar==='ot'?'Cliente / Proyecto':'OTs','Horas','Facturado (base)','Gastos','Coste horas','Margen €','Margen %'];}
+function _margFilaArr(x){return[x.label,_margAgrupar==='ot'?x.sub:x.n,+(+x.horas).toFixed(2),+(+x.facturadoBase).toFixed(2),+(+x.gastos).toFixed(2),+(+x.costeHoras).toFixed(2),+(+x.margen).toFixed(2),x.margenPct===null?'':+(+x.margenPct).toFixed(1)];}
+
+function exportarMargenesExcel(){
+  const go=()=>{
+    const {filas,tot}=_margFilasTot(document.getElementById('search-margenes')?.value||'');
+    if(!filas.length)return alert('No hay datos que exportar');
+    const aoa=[['Márgenes — IAM'],[_margDescFiltros().join(' · ')],['Generado: '+new Date().toLocaleDateString('es-ES')],[],_margCols()];
+    filas.forEach(x=>aoa.push(_margFilaArr(x)));
+    aoa.push(['TOTAL',tot.N,+tot.H.toFixed(2),+tot.F.toFixed(2),+tot.G.toFixed(2),+tot.C.toFixed(2),+tot.M.toFixed(2),tot.P===null?'':+tot.P.toFixed(1)]);
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=[{wch:26},{wch:34},{wch:9},{wch:16},{wch:12},{wch:14},{wch:12},{wch:10}];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Márgenes');
+    XLSX.writeFile(wb,'margenes_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  };
+  if(typeof XLSX==='undefined'){
+    const sc=document.createElement('script');
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload=go;sc.onerror=()=>alert('Error cargando librería Excel');
+    document.head.appendChild(sc);
+  }else go();
+}
+
+function exportarMargenesPDF(){
+  const {filas,tot}=_margFilasTot(document.getElementById('search-margenes')?.value||'');
+  if(!filas.length)return alert('No hay datos que exportar');
+  const col=v=>v>=0?'#16794c':'#c0392b';
+  const w=window.open('','_blank');
+  if(!w)return alert('El navegador ha bloqueado la ventana. Permite las ventanas emergentes e inténtalo de nuevo.');
+  const cols=_margCols();
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Márgenes</title>
+  <style>body{font-family:Arial,sans-serif;font-size:11px;margin:18px;color:#222}h1{font-size:18px;margin:0 0 4px}.f{color:#666;margin-bottom:12px}
+  table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:4px 6px;text-align:left}th{background:#eee}td.n,th.n{text-align:right}
+  tfoot td{font-weight:bold;background:#f3f3f3}@page{size:A4 landscape;margin:10mm}</style></head><body>
+  <h1>Márgenes — IAM</h1><div class="f">${esc(_margDescFiltros().join(' · '))} · Generado: ${new Date().toLocaleDateString('es-ES')}</div>
+  <table><thead><tr>${cols.map((c,i)=>`<th class="${i>=2?'n':''}">${esc(c)}</th>`).join('')}</tr></thead><tbody>
+  ${filas.map(x=>`<tr><td>${esc(x.label)}</td><td>${esc(String(_margAgrupar==='ot'?x.sub:x.n))}</td><td class="n">${hFmt(x.horas)}</td><td class="n">${fmtMoneda(x.facturadoBase)}</td><td class="n">${fmtMoneda(x.gastos)}</td><td class="n">${fmtMoneda(x.costeHoras)}</td><td class="n" style="color:${col(x.margen)}">${fmtMoneda(x.margen)}</td><td class="n" style="color:${col(x.margen)}">${x.margenPct===null?'—':x.margenPct.toFixed(1)+'%'}</td></tr>`).join('')}
+  </tbody><tfoot><tr><td>TOTAL</td><td>${tot.N}</td><td class="n">${hFmt(tot.H)}</td><td class="n">${fmtMoneda(tot.F)}</td><td class="n">${fmtMoneda(tot.G)}</td><td class="n">${fmtMoneda(tot.C)}</td><td class="n" style="color:${col(tot.M)}">${fmtMoneda(tot.M)}</td><td class="n" style="color:${col(tot.M)}">${tot.P===null?'—':tot.P.toFixed(1)+'%'}</td></tr></tfoot></table>
+  <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>`);
+  w.document.close();
+}
+
+function _renderMargenesTabla(filtro){
+  const el=document.getElementById('main-content');
+  const {filas,tot}=_margFilasTot(filtro);
+  const totF=tot.F,totG=tot.G,totC=tot.C,totM=tot.M,totP=tot.P;
   el.innerHTML=`
-  <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
+  <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
     <div class="stat-card"><div class="stat-label">Facturado (base)</div><div class="stat-value">${fmtMoneda(totF)}</div></div>
     <div class="stat-card"><div class="stat-label">Gastos</div><div class="stat-value amber">${fmtMoneda(totG)}</div></div>
     <div class="stat-card"><div class="stat-label">Coste horas</div><div class="stat-value amber">${fmtMoneda(totC)}</div></div>
     <div class="stat-card"><div class="stat-label">Margen</div><div class="stat-value" style="color:${totM>=0?'var(--green)':'var(--red)'}">${fmtMoneda(totM)}</div></div>
+    <div class="stat-card"><div class="stat-label">Margen %</div><div class="stat-value" style="color:${totM>=0?'var(--green)':'var(--red)'}">${totP===null?'—':totP.toFixed(1)+'%'}</div></div>
   </div>
   <div class="table-wrap"><table class="table">
     <thead><tr>
