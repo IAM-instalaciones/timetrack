@@ -644,8 +644,11 @@ function findOrCrearProyecto(ref,cliente,color){
 }
 
 function attachOT(otRaw){
-  const proy=findOrCrearProyecto(otRaw.ref,otRaw.cliente,otRaw.color);
   let ot=S.ots.find(x=>x.id===otRaw.id);
+  // Si la fuente no trae ni proyecto ni cliente pero la OT ya los tenía, se conservan
+  const _vacio=!(otRaw.ref||'').trim()&&!(otRaw.cliente||'').trim();
+  const _pPrev=ot&&S.proyectos.find(x=>x.id===ot.proyectoId);
+  const proy=(_vacio&&_pPrev&&(_pPrev.ref||_pPrev.cliente))?_pPrev:findOrCrearProyecto(otRaw.ref,otRaw.cliente,otRaw.color);
   // Si el dato trae "asignadoA" es porque viene de nuestro propio export a SharePoint
   // (_otParaSP) — es la fuente fiable de estado/asignación entre dispositivos.
   // Si no lo trae, viene del Manifiesto (su "estado" es de facturación, no de fichaje).
@@ -957,27 +960,48 @@ async function importarOTsDesdeManifiesto(){
       return{base,total};
     }
     let ok = 0;
+    const problemas = [];
+    const esProy = v => /^PROY\s*\d+/i.test(String(v||'').trim());
     ordenes.forEach(ot => {
-      const opo = oportunidades.find(o => o.id === ot.opoId);
-      const cli = opo ? clientes.find(c => c.id === opo.cliente) : null;
+      // Oportunidad: por opoId; si no, por número (las OTs comparten número con su oportunidad)
+      let opo = oportunidades.find(o => o.id === ot.opoId);
+      if(!opo && ot.num) opo = oportunidades.find(o => String(o.num) === String(ot.num));
+      // Cliente: el de la oportunidad, o el que guarda la propia OT (por id o por nombre)
+      const cliId = (opo && opo.cliente) || ot.cliente;
+      const cli = clientes.find(c => c.id === cliId) || clientes.find(c => c.nombre === cliId) || null;
+      // Referencia de proyecto (PROYxxx): primero la que tenga formato PROY, aunque esté en otro campo
+      const cands = [opo && opo.referencia, ot.refCliente, opo && opo.titulo].filter(Boolean);
+      const ref = cands.find(esProy) || (opo && opo.referencia) || ot.refCliente || '';
+      // Descripción: título del presupuesto (que no sea la propia referencia PROY)
+      const descCands = [opo && opo.titulo, opo && opo.referencia, ot.descripcion].filter(x => x && !esProy(x) && x !== ref);
+      const desc = descCands[0] || '';
+      const existente = S.ots.find(x => x.id === 'ot_' + ot.id);
       const otAttached = attachOT({
         id: 'ot_' + ot.id,
         num: ot.num,
-        ref: opo ? (opo.referencia || '') : '',
+        ref: ref,
         cliente: cli ? cli.nombre : '',
-        descripcion: (opo ? (opo.titulo || opo.referencia) : '') || ot.descripcion || '',
+        descripcion: desc,
         estado: ot.estado || 'En proceso',
         fecha: ot.fecha || '',
         color: '#c0272d',
         creado: ot.fecha || new Date().toISOString().slice(0, 10)
       });
-      otAttached.opoId = ot.opoId || '';
-      otAttached.familia = opo ? (opo.familia || '') : '';
-      otAttached.facturado = opo ? facturadoDeOpo(opo.id) : {base:0,total:0};
+      otAttached.opoId = ot.opoId || (opo ? opo.id : '');
+      otAttached.familia = opo ? (opo.familia || '') : (otAttached.familia || '');
+      if(opo) otAttached.facturado = facturadoDeOpo(opo.id);
+      else if(!otAttached.facturado) otAttached.facturado = {base:0,total:0};
+      const falta = [];
+      if(!opo) falta.push('sin presupuesto/oportunidad');
+      if(!cli) falta.push('sin cliente');
+      if(!ref) falta.push('sin proyecto');
+      if(falta.length) problemas.push('OT ' + ot.num + ': ' + falta.join(', '));
       ok++;
     });
     save();renderProyList();renderPage(currentPage);
-    showSync('\u2713 ' + ok + ' OTs sincronizadas desde el Manifiesto', true);
+    showSync('\u2713 ' + ok + ' OTs sincronizadas desde el Manifiesto' + (problemas.length ? ' (' + problemas.length + ' con datos incompletos)' : ''), true);
+    if(problemas.length) console.warn('OTs con datos incompletos en el Manifiesto:\n' + problemas.join('\n'));
+    if(problemas.length) alert('Sincronizadas ' + ok + ' OTs. Estas tienen datos incompletos en el Manifiesto (revísalas allí):\n\n' + problemas.slice(0,25).join('\n') + (problemas.length>25?'\n… y '+(problemas.length-25)+' más':''));
   }catch(e){
     console.error('importarOTsDesdeManifiesto', e);
     showSync('\u26a0 Error leyendo datos del Manifiesto', false);
