@@ -989,7 +989,16 @@ async function importarOTsDesdeManifiesto(){
       });
       otAttached.opoId = ot.opoId || (opo ? opo.id : '');
       otAttached.familia = opo ? (opo.familia || '') : (otAttached.familia || '');
-      if(opo) otAttached.facturado = facturadoDeOpo(opo.id);
+      if(opo){
+        otAttached.facturado = facturadoDeOpo(opo.id);
+        // Pedidos de compra asociados al presupuesto → se tratan como gasto de la OT (base sin IVA)
+        const lista = (S2.pedidos || []).filter(x => x.opoId === opo.id).map(x => {
+          let b = 0;
+          (x.items || []).filter(it => it.precio !== undefined).forEach(it => { b += calcItemMini(it).neto; });
+          return {num: x.numPed || x.num || '', prov: x.proveedor || '', fecha: x.fecha || '', ref: x.referencia || '', base: +b.toFixed(2)};
+        });
+        otAttached.pedidosCompra = {base: +lista.reduce((a, x) => a + x.base, 0).toFixed(2), lista};
+      }
       else if(!otAttached.facturado) otAttached.facturado = {base:0,total:0};
       const falta = [];
       if(!opo) falta.push('sin presupuesto/oportunidad');
@@ -1316,8 +1325,9 @@ function renderDashboard(el,actions){
 // ════════════════════════════════════════════
 let _margAgrupar='ot'; // 'ot' | 'cliente' | 'proyecto' | 'familia'
 
+function _pedidosOTBase(ot){return(ot&&ot.pedidosCompra&&+ot.pedidosCompra.base)||0;}
 function _margenOT(ot){
-  const gastos=S.gastos.filter(g=>g.proyId===ot.id).reduce((a,g)=>a+(+g.importe||0),0);
+  const gastos=S.gastos.filter(g=>g.proyId===ot.id).reduce((a,g)=>a+(+g.importe||0),0)+_pedidosOTBase(ot);
   const regs=S.registros.filter(r=>r.proyId===ot.id);
   const horas=regs.reduce((a,r)=>a+(+r.horas||0),0);
   const costeHoras=regs.reduce((a,r)=>{const t=getTrab(r.trabajadorId);return a+(+r.horas||0)*(t&&t.costeHora?+t.costeHora:0);},0);
@@ -1535,7 +1545,7 @@ function _renderOTsAdminTable(el,filtro){
   let filas=S.ots.map(o=>{
     const p=S.proyectos.find(x=>x.id===o.proyectoId);
     const horas=horasOT(o.id);
-    const gastos=S.gastos.filter(g=>g.proyId===o.id).reduce((a,g)=>a+(+g.importe||0),0);
+    const gastos=S.gastos.filter(g=>g.proyId===o.id).reduce((a,g)=>a+(+g.importe||0),0)+_pedidosOTBase(o);
     return{ot:o,proy:p,horas,gastos};
   });
   if(f)filas=filas.filter(x=>String(x.ot.num).toLowerCase().includes(f)||(x.proy?.cliente||'').toLowerCase().includes(f)||(x.proy?.ref||'').toLowerCase().includes(f)||(x.ot.descripcion||'').toLowerCase().includes(f));
@@ -1795,7 +1805,8 @@ function renderOTDetail(el,actions,sub){
   const regs=S.registros.filter(r=>r.proyId===currentOTId).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   const gastos=S.gastos.filter(g=>g.proyId===currentOTId).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   const totalH=regs.reduce((a,r)=>a+(+r.horas||0),0);
-  const totalG=gastos.reduce((a,g)=>a+(+g.importe||0),0);
+  const pedidosOT=(ot.pedidosCompra&&ot.pedidosCompra.lista)||[];
+  const totalG=gastos.reduce((a,g)=>a+(+g.importe||0),0)+_pedidosOTBase(ot);
   // Hours by tipo
   const tipoMap={};
   regs.forEach(r=>{tipoMap[r.tipoTrabajo||'—']=(tipoMap[r.tipoTrabajo||'—']||0)+(+r.horas||0);});
@@ -1843,6 +1854,12 @@ function renderOTDetail(el,actions,sub){
           </tr>`;
         }).join('')}</tbody>
       </table></div>${gastos.length?'':'<div style="text-align:center;padding:16px;color:var(--muted);font-size:13px;">Sin gastos en esta OT todavía.</div>'}
+      ${pedidosOT.length?`<div style="font-size:14px;font-weight:700;margin:20px 0 4px;">Pedidos de compra (Gestión)</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Se suman automáticamente como gasto de la OT (base sin IVA).</div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Nº pedido</th><th>Fecha</th><th>Proveedor</th><th>Referencia</th><th>Base</th></tr></thead>
+        <tbody>${pedidosOT.map(x=>`<tr><td class="mono">${esc(x.num)}</td><td class="mono">${x.fecha?fmtDate(x.fecha):'—'}</td><td>${esc(x.prov)}</td><td class="text-muted text-sm">${esc(x.ref)}</td><td class="font-bold amber">${fmtMoneda(x.base)}</td></tr>`).join('')}</tbody>
+      </table></div>`:''}
     </div>
     <div style="width:200px;">
       <div style="font-size:14px;font-weight:700;margin-bottom:12px;">Por tipo de trabajo</div>
