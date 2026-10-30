@@ -844,7 +844,15 @@ async function spGuardar(list,obj){
   try{
     if(_spIds[key])await spFetch(spUrl(list)+`(${_spIds[key]})`,{method:'PATCH',headers:{'If-Match':'*'},body});
     else{const res=await spFetch(spUrl(list),{method:'POST',body});if(res)_spIds[key]=res.Id;}
-  }catch(e){console.warn('spGuardar',list,e.message);}
+  }catch(e){
+    console.warn('spGuardar',list,e.message);
+    // Aviso visible: si no se guarda en SharePoint, los demás dispositivos no verán el cambio
+    showSync('⚠ NO se guardó en SharePoint ('+list+': '+e.message+')',false);
+    if(session&&session.role==='admin'&&!window._spAvisoMostrado){
+      window._spAvisoMostrado=true;
+      alert('⚠ No se ha podido guardar en SharePoint ('+list+', '+obj.id+').\n\nError: '+e.message+'\nTamaño del dato: '+body.length+' caracteres.\n\nMientras no se guarde, los técnicos NO verán este cambio en sus dispositivos. Haz una captura de este aviso y envíala.');
+    }
+  }
   finally{_spSaveEnCurso=Math.max(0,_spSaveEnCurso-1);}
 }
 
