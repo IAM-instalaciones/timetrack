@@ -828,9 +828,22 @@ async function spFetch(url,opts={}){
   return res.json();
 }
 
+// SharePoint devuelve como máximo 5000 filas por petición: se siguen los enlaces de "página siguiente"
+// hasta leer TODA la lista (si no, los registros más recientes quedaban fuera y cada dispositivo veía datos distintos)
+async function spFetchAll(url){
+  let out=[],next=url,guard=0;
+  while(next&&guard++<60){
+    const r=await spFetch(next);
+    if(!r)break;
+    out=out.concat(r.value||[]);
+    next=r['odata.nextLink']||r['@odata.nextLink']||null;
+  }
+  return{value:out};
+}
+
 async function _cargarSpIds(list){
   try{
-    const res=await spFetch(spUrl(list)+'?$top=5000&$select=Id,Title&$orderby=Id');
+    const res=await spFetchAll(spUrl(list)+'?$top=5000&$select=Id,Title&$orderby=Id');
     res.value.forEach(i=>{_spIds[list+'_'+i.Title]=i.Id;});
   }catch(e){
     // TT_OTs might not exist yet - not critical
@@ -883,14 +896,15 @@ async function cargarDesdeSP(mostrarMsg=true){
   if(mostrarMsg)showSync('⟳ Sincronizando...',false);
   try{
     const [proy,ots,trabs,tipos,regs,gastos,cfgs]=await Promise.all([
-      spFetch(spUrl('proyectos')+'?$top=2000&$select=Title,SPData&$orderby=Id'),
-      spFetch(spUrl('ots')+'?$top=2000&$select=Title,SPData&$orderby=Id').catch(()=>({value:[]})),
-      spFetch(spUrl('trabajadores')+'?$top=500&$select=Title,SPData&$orderby=Id'),
-      spFetch(spUrl('tipos')+'?$top=500&$select=Title,SPData'),
-      spFetch(spUrl('registros')+'?$top=10000&$select=Title,SPData&$orderby=Id'),
-      spFetch(spUrl('gastos')+'?$top=10000&$select=Title,SPData&$orderby=Id'),
-      spFetch(spUrl('config')+'?$top=10&$select=Title,SPData'),
+      spFetchAll(spUrl('proyectos')+'?$top=5000&$select=Title,SPData&$orderby=Id'),
+      spFetchAll(spUrl('ots')+'?$top=5000&$select=Title,SPData&$orderby=Id').catch(()=>({value:[]})),
+      spFetchAll(spUrl('trabajadores')+'?$top=5000&$select=Title,SPData&$orderby=Id'),
+      spFetchAll(spUrl('tipos')+'?$top=5000&$select=Title,SPData'),
+      spFetchAll(spUrl('registros')+'?$top=5000&$select=Title,SPData&$orderby=Id'),
+      spFetchAll(spUrl('gastos')+'?$top=5000&$select=Title,SPData&$orderby=Id'),
+      spFetchAll(spUrl('config')+'?$top=5000&$select=Title,SPData'),
     ]);
+    console.info('[TimeTrack] filas leídas de SharePoint → registros:',regs.value.length,'gastos:',gastos.value.length,'OTs:',ots.value.length,'trabajadores:',trabs.value.length);
     function parse(arr,lista){
       // Si hay filas duplicadas para un mismo id (residuo de bugs de sincronización
       // antiguos), nos quedamos con la ÚLTIMA — es la más probable de ser la reciente,
@@ -903,6 +917,14 @@ async function cargarDesdeSP(mostrarMsg=true){
       const spIds=new Set(spItems.map(x=>x.id));
       const soloLocal=local.filter(x=>x&&x.id&&!spIds.has(x.id));
       return [...spItems,...soloLocal];
+    }
+    // Rescate: un técnico sube a SharePoint sus propios registros/gastos que solo existen en su dispositivo
+    const _pendientes=[];
+    if(session&&session.role==='worker'&&session.workerId){
+      const ids=arr=>new Set(arr.value.map(i=>{try{return JSON.parse(i.SPData).id;}catch(e){return null;}}));
+      const spR=ids(regs),spG=ids(gastos);
+      _filtrarTumbas('registros',S.registros).filter(r=>r&&r.id&&r.trabajadorId===session.workerId&&!spR.has(r.id)).forEach(r=>_pendientes.push(['registros',r]));
+      _filtrarTumbas('gastos',S.gastos).filter(g=>g&&g.id&&g.trabajadorId===session.workerId&&!spG.has(g.id)).forEach(g=>_pendientes.push(['gastos',g]));
     }
     if(proy.value.length)S.proyectos=parse(proy,'proyectos').filter(p=>!_esOTsuelta(p));
     // OTs de TT_OTs (creadas desde Manifiesto): se anidan bajo su Proyecto, nunca se mezclan en S.proyectos
@@ -917,6 +939,12 @@ async function cargarDesdeSP(mostrarMsg=true){
     const pinCfg=cfgs.value.find(i=>i.Title==='pin');
     if(pinCfg)S.pin=JSON.parse(pinCfg.SPData).value;
     save();
+    if(_pendientes.length){
+      for(const [l,o] of _pendientes)await spGuardar(l,o);
+      console.info('[TimeTrack] subidos a SharePoint '+_pendientes.length+' registros/gastos que solo estaban en este dispositivo');
+      if(mostrarMsg)showSync('✓ Datos actualizados · '+_pendientes.length+' pendientes subidos a SharePoint',true);
+      return true;
+    }
     if(mostrarMsg)showSync('✓ Datos actualizados',true);
     return true;
   }catch(e){
