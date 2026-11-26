@@ -889,14 +889,43 @@ async function spGuardar(list,obj){
   finally{_spSaveEnCurso=Math.max(0,_spSaveEnCurso-1);}
 }
 
+// Borra de SharePoint TODAS las filas de ese elemento. Antes solo se borraba una, y si había filas
+// duplicadas (restos de bugs antiguos) el elemento seguía existiendo para el resto de dispositivos.
 async function spEliminar(list,objId){
   const key=list+'_'+objId;
   _quitarPend(key);
-  if(!_spIds[key])await _cargarSpIds(list);
-  if(!_spIds[key])return;
-  try{await spFetch(spUrl(list)+`(${_spIds[key]})`,{method:'DELETE',headers:{'If-Match':'*'}});}
-  catch(e){if(!String(e.message).includes('404'))console.warn('spEliminar',e.message);}
+  let filas=[];
+  try{
+    const t=String(objId).replace(/'/g,"''");
+    const r=await spFetchAll(spUrl(list)+`?$top=5000&$select=Id&$filter=Title eq '${encodeURIComponent(t)}'`);
+    filas=r.value.map(i=>i.Id);
+  }catch(e){
+    if(!_spIds[key])await _cargarSpIds(list);
+    if(_spIds[key])filas=[_spIds[key]];
+  }
+  for(const rowId of filas){
+    try{await spFetch(spUrl(list)+`(${rowId})`,{method:'DELETE',headers:{'If-Match':'*'}});}
+    catch(e){if(!String(e.message).includes('404'))console.warn('spEliminar',list,objId,e.message);}
+  }
   delete _spIds[key];
+}
+
+// Si en SharePoint quedan filas de elementos que se borraron en este dispositivo, se eliminan allí también
+async function _limpiarBorradosEnSP(listas){
+  const t=_getTumbas();let n=0;
+  for(const [list,arr] of listas){
+    const muertos=new Set(t[list]||[]);
+    if(!muertos.size)continue;
+    for(const i of arr.value){
+      let id=i.Title;
+      try{const o=JSON.parse(i.SPData);if(o&&o.id)id=o.id;}catch(e){}
+      if(muertos.has(id)&&i.Id){
+        try{await spFetch(spUrl(list)+`(${i.Id})`,{method:'DELETE',headers:{'If-Match':'*'}});n++;}
+        catch(e){if(!String(e.message).includes('404'))console.warn('limpiarBorrados',list,id,e.message);}
+      }
+    }
+  }
+  if(n)console.info('[TimeTrack] eliminadas de SharePoint '+n+' filas de elementos borrados que seguían allí');
 }
 
 // Tumbas (elementos eliminados localmente que no deben reaparecer)
@@ -917,12 +946,12 @@ async function cargarDesdeSP(mostrarMsg=true){
   if(mostrarMsg)showSync('⟳ Sincronizando...',false);
   try{
     const [proy,ots,trabs,tipos,regs,gastos,cfgs]=await Promise.all([
-      spFetchAll(spUrl('proyectos')+'?$top=5000&$select=Title,SPData&$orderby=Id'),
-      spFetchAll(spUrl('ots')+'?$top=5000&$select=Title,SPData&$orderby=Id').catch(()=>({value:[]})),
-      spFetchAll(spUrl('trabajadores')+'?$top=5000&$select=Title,SPData&$orderby=Id'),
+      spFetchAll(spUrl('proyectos')+'?$top=5000&$select=Id,Title,SPData&$orderby=Id'),
+      spFetchAll(spUrl('ots')+'?$top=5000&$select=Id,Title,SPData&$orderby=Id').catch(()=>({value:[]})),
+      spFetchAll(spUrl('trabajadores')+'?$top=5000&$select=Id,Title,SPData&$orderby=Id'),
       spFetchAll(spUrl('tipos')+'?$top=5000&$select=Title,SPData'),
-      spFetchAll(spUrl('registros')+'?$top=5000&$select=Title,SPData&$orderby=Id'),
-      spFetchAll(spUrl('gastos')+'?$top=5000&$select=Title,SPData&$orderby=Id'),
+      spFetchAll(spUrl('registros')+'?$top=5000&$select=Id,Title,SPData&$orderby=Id'),
+      spFetchAll(spUrl('gastos')+'?$top=5000&$select=Id,Title,SPData&$orderby=Id'),
       spFetchAll(spUrl('config')+'?$top=5000&$select=Title,SPData'),
     ]);
     console.info('[TimeTrack] filas leídas de SharePoint → registros:',regs.value.length,'gastos:',gastos.value.length,'OTs:',ots.value.length,'trabajadores:',trabs.value.length);
@@ -933,6 +962,7 @@ async function cargarDesdeSP(mostrarMsg=true){
       if(mostrarMsg)showSync('⚠ SharePoint no devuelve datos para esta cuenta (permisos)',false);
       return false;
     }
+    await _limpiarBorradosEnSP([['proyectos',proy],['ots',ots],['trabajadores',trabs],['registros',regs],['gastos',gastos]]);
     function parse(arr,lista){
       // Si hay filas duplicadas para un mismo id (residuo de bugs de sincronización
       // antiguos), nos quedamos con la ÚLTIMA — es la más probable de ser la reciente,
