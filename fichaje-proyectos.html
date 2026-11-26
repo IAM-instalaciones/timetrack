@@ -797,7 +797,7 @@ async function _cargarSpSilencioso(){
 
 function _avisoSpNoCargado(){
   const el=document.getElementById('ms-error');
-  if(el)el.textContent='No se ha podido cargar la lista de trabajadores desde SharePoint. Comprueba la conexión y los permisos y vuelve a pulsar "Entrar con Microsoft 365".';
+  if(el)el.textContent='No se ha podido cargar la lista de trabajadores desde SharePoint. Puede que tu cuenta no tenga permiso para ver las listas de TimeTrack: avisa al administrador.';
 }
 
 async function loginMicrosoft(){
@@ -861,12 +861,22 @@ async function _cargarSpIds(list){
   }
 }
 
+// Pendientes de subir: elementos guardados en este dispositivo que aún no han llegado a SharePoint.
+// Solo estos se conservan localmente si no están en SharePoint; el resto lo decide SharePoint
+// (así, lo que el administrador borra desaparece también en el resto de dispositivos).
+function _getPend(){try{return JSON.parse(localStorage.getItem('tt_pendientes')||'[]');}catch(e){return[];}}
+function _setPend(a){try{localStorage.setItem('tt_pendientes',JSON.stringify(a.slice(-2000)));}catch(e){}}
+function _marcarPend(key){const a=_getPend();if(!a.includes(key)){a.push(key);_setPend(a);}}
+function _quitarPend(key){const a=_getPend();const i=a.indexOf(key);if(i>=0){a.splice(i,1);_setPend(a);}}
+
 async function spGuardar(list,obj){
   const key=list+'_'+obj.id,body=JSON.stringify({Title:obj.id,SPData:JSON.stringify(obj)});
   _spSaveEnCurso++;
+  _marcarPend(key);
   try{
     if(_spIds[key])await spFetch(spUrl(list)+`(${_spIds[key]})`,{method:'PATCH',headers:{'If-Match':'*'},body});
     else{const res=await spFetch(spUrl(list),{method:'POST',body});if(res)_spIds[key]=res.Id;}
+    _quitarPend(key);
   }catch(e){
     console.warn('spGuardar',list,e.message);
     // Aviso visible: si no se guarda en SharePoint, los demás dispositivos no verán el cambio
@@ -881,6 +891,7 @@ async function spGuardar(list,obj){
 
 async function spEliminar(list,objId){
   const key=list+'_'+objId;
+  _quitarPend(key);
   if(!_spIds[key])await _cargarSpIds(list);
   if(!_spIds[key])return;
   try{await spFetch(spUrl(list)+`(${_spIds[key]})`,{method:'DELETE',headers:{'If-Match':'*'}});}
@@ -915,6 +926,13 @@ async function cargarDesdeSP(mostrarMsg=true){
       spFetchAll(spUrl('config')+'?$top=5000&$select=Title,SPData'),
     ]);
     console.info('[TimeTrack] filas leídas de SharePoint → registros:',regs.value.length,'gastos:',gastos.value.length,'OTs:',ots.value.length,'trabajadores:',trabs.value.length);
+    // Si SharePoint responde pero no devuelve ningún trabajador, esta cuenta no tiene permiso de lectura
+    // sobre las listas (o solo ve sus propios elementos): no damos por buenos los datos locales.
+    if(!trabs.value.length){
+      console.warn('[TimeTrack] SharePoint no devuelve trabajadores para esta cuenta: revisar permisos del usuario en el sitio y en las listas TT_');
+      if(mostrarMsg)showSync('⚠ SharePoint no devuelve datos para esta cuenta (permisos)',false);
+      return false;
+    }
     function parse(arr,lista){
       // Si hay filas duplicadas para un mismo id (residuo de bugs de sincronización
       // antiguos), nos quedamos con la ÚLTIMA — es la más probable de ser la reciente,
@@ -923,18 +941,21 @@ async function cargarDesdeSP(mostrarMsg=true){
       arr.value.forEach(i=>{try{const o=JSON.parse(i.SPData);if(o&&o.id)map[o.id]=o;}catch(e){}});
       return _filtrarTumbas(lista,Object.values(map));
     }
-    function merge(local,spItems){
+    // SharePoint manda: de lo local solo se conserva lo que está pendiente de subir desde ESTE dispositivo.
+    // Lo demás que no esté en SharePoint es porque se ha borrado allí, y se quita también aquí.
+    const _pend=new Set(_getPend());
+    function merge(local,spItems,lista){
       const spIds=new Set(spItems.map(x=>x.id));
-      const soloLocal=local.filter(x=>x&&x.id&&!spIds.has(x.id));
+      const soloLocal=local.filter(x=>x&&x.id&&!spIds.has(x.id)&&_pend.has(lista+'_'+x.id));
       return [...spItems,...soloLocal];
     }
-    // Rescate: un técnico sube a SharePoint sus propios registros/gastos que solo existen en su dispositivo
+    // Rescate: se suben a SharePoint los registros/gastos de este dispositivo que quedaron pendientes
     const _pendientes=[];
-    if(session&&session.role==='worker'&&session.workerId){
+    {
       const ids=arr=>new Set(arr.value.map(i=>{try{return JSON.parse(i.SPData).id;}catch(e){return null;}}));
       const spR=ids(regs),spG=ids(gastos);
-      _filtrarTumbas('registros',S.registros).filter(r=>r&&r.id&&r.trabajadorId===session.workerId&&!spR.has(r.id)).forEach(r=>_pendientes.push(['registros',r]));
-      _filtrarTumbas('gastos',S.gastos).filter(g=>g&&g.id&&g.trabajadorId===session.workerId&&!spG.has(g.id)).forEach(g=>_pendientes.push(['gastos',g]));
+      _filtrarTumbas('registros',S.registros).filter(r=>r&&r.id&&!spR.has(r.id)&&_pend.has('registros_'+r.id)).forEach(r=>_pendientes.push(['registros',r]));
+      _filtrarTumbas('gastos',S.gastos).filter(g=>g&&g.id&&!spG.has(g.id)&&_pend.has('gastos_'+g.id)).forEach(g=>_pendientes.push(['gastos',g]));
     }
     if(proy.value.length)S.proyectos=parse(proy,'proyectos').filter(p=>!_esOTsuelta(p));
     // OTs de TT_OTs (creadas desde Manifiesto): se anidan bajo su Proyecto, nunca se mezclan en S.proyectos
@@ -942,10 +963,11 @@ async function cargarDesdeSP(mostrarMsg=true){
       const otsFromGestion=parse(ots,'ots');
       otsFromGestion.forEach(o=>attachOT(o));
     }
-    if(trabs.value.length)S.trabajadores=merge(S.trabajadores,parse(trabs,'trabajadores'));
+    // Trabajadores: la lista de SharePoint es la única válida (un trabajador dado de baja desaparece en todos los dispositivos)
+    S.trabajadores=merge(S.trabajadores,parse(trabs,'trabajadores'),'trabajadores');
     if(tipos.value.length)S.tiposTrabajo=parse(tipos,'tipos').map(x=>x.nombre||x);
-    if(regs.value.length)S.registros=merge(S.registros,parse(regs,'registros'));
-    if(gastos.value.length)S.gastos=merge(S.gastos,parse(gastos,'gastos'));
+    S.registros=merge(S.registros,parse(regs,'registros'),'registros');
+    S.gastos=merge(S.gastos,parse(gastos,'gastos'),'gastos');
     const pinCfg=cfgs.value.find(i=>i.Title==='pin');
     if(pinCfg)S.pin=JSON.parse(pinCfg.SPData).value;
     save();
